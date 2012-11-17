@@ -9,7 +9,7 @@
 
 
 (define (make-scene)
- (gfx-node (constant-lin (vec 0 0) 1 0) (list)))
+ (gfx-node (constant-lin (vec 0 0) 1 0) null));k(gfx-image 'fx/ch1/well-bg))))
 
 (define s (make-scene))
 

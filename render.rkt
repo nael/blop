@@ -18,23 +18,43 @@
 ; ==
 (define (gfx-node-add n c)
   (set-gfx-node-children! n (cons c (gfx-node-children n))))
-
+(define draw-depth-mode #t);todo make this clean way
 
 (define (rad->deg r) (* r (/ 180 pi)))
 
-(define (draw-image image-name frame l)
+(define (draw-image image-name frame l dd)
   (glMatrixMode GL_MODELVIEW)
   (glLoadIdentity)
+  (glScalef (/ 2 WIDTH) (/ 2 HEIGHT) 1)
+  (glTranslatef (- (/ WIDTH 2)) (- (/ HEIGHT 2)) 0)
   (define image (texture-by-name image-name))
   (glScalef (lin-scale l) (lin-scale l) 1)
   (glTranslatef (vec-x (lin-tr l)) (vec-y (lin-tr l)) 0)
   (glRotatef (rad->deg (lin-angle l)) 0 0 1)
 
   (glScalef (texture-w image) (texture-h image) 1)
-
-  (glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_MODULATE)
   (glBindTexture GL_TEXTURE_2D (texture-id image))
-
+  (cond [(not draw-depth-mode) (glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_MODULATE)]
+        [else  (glTexEnvi GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_COMBINE)
+              (define d (min (max dd 1) 10))
+              (define c (exact->inexact (- 1 (/ (- d 1) 9))))
+              (printf "DEPTH: ~a ~a\n" c dd)
+              (glTexEnvfv GL_TEXTURE_ENV GL_TEXTURE_ENV_COLOR (list->gl-float-vector (list c c c 255)))
+              
+              (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_RGB GL_REPLACE)
+              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_RGB GL_CONSTANT)
+              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_RGB GL_CONSTANT)
+              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_RGB GL_SRC_COLOR)
+              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_RGB GL_SRC_COLOR)
+              
+              (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_ALPHA GL_REPLACE)
+              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_ALPHA GL_TEXTURE0)
+              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_ALPHA GL_TEXTURE0)
+              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_ALPHA GL_SRC_ALPHA)
+              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_ALPHA GL_SRC_ALPHA)])
+  
+  
+  ;(glColor4f 0 255 0 255)
   (let ([sx (texture-x-coord image frame)] [sy (texture-y-coord image frame)])
     (let ([tx1 (* sx (texture-sw image))] [ty1 (* sy (texture-sh image))])
       (draw-quad tx1 ty1 (+ tx1 (texture-sw image)) (+ ty1 (texture-sh image))))))
@@ -50,7 +70,7 @@
     (let ([cur (lin-compose ltr (lin-eval (gfx-node-transform node) at-time))])
       (append* (if (and (gfx-drawable? node) (not (null? (gfx-drawable-image node))))
                    (list (cons ((gfx-drawable-depth node) at-time)
-                               (lambda () (draw-image (gfx-drawable-image node) ((gfx-drawable-frame node) at-time) cur))))
+                               (lambda () (draw-image (gfx-drawable-image node) ((gfx-drawable-frame node) at-time) cur ((gfx-drawable-depth node) at-time)))))
                    (list))
                (for/list ([c (gfx-node-children node)])
                          (render-node c cur)))))
@@ -89,6 +109,7 @@
 ;  (glDepthMask GL_TRUE)
   (glEnable GL_BLEND)
   (glBlendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA)
+  ;(glBlendFunc GL_ONE GL_ZE
   (render-frame scene (current-inexact-milliseconds))
   (ce))
 (define (init-opengl) '())
@@ -115,7 +136,8 @@
     (define/override (on-char key-event)
       (display "key evt ")
       (displayln key-event)
-      (custodian-shutdown-all (current-custodian)))
+      (when (equal? (send key-event get-key-code) #\q ) (custodian-shutdown-all (current-custodian)))
+      (when (equal? (send key-event get-key-code) #\d )(set! draw-depth-mode (not draw-depth-mode))))
     (define/override (on-event mouse-event)
       (when (send mouse-event button-up? 'left)
         (event-cb (list 'mouse-click (send mouse-event get-x) (- HEIGHT (send mouse-event get-y))))))
@@ -126,16 +148,15 @@
           (resize width height))))
     
     (super-instantiate () (style '(gl)))))
-(define WIDTH 1024)
+(define WIDTH 1400)
 (define HEIGHT 700)
 (define (make-view s init-cb event-cb timer-cb)
-  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list 'hide-menu-bar))))
+  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list))))
   (define gl  (new my-canvas% [parent win] [scene s] [init-cb init-cb] [event-cb event-cb] [timer-cb timer-cb]))
   (send win show #t))
 
-(provide WIDTH HEIGHT constant-lin set-gfx-node-scale! set-gfx-node-translation! gfx-node-add constant make-view gfx-image  lin-eval
-         
-         )
+(provide WIDTH HEIGHT constant-lin set-gfx-node-scale! set-gfx-node-translation! gfx-node-add constant make-view gfx-image  lin-eval)
+
 (provide (contract-out 
           [struct gfx-node ([transform lin?] [children list?])]
           [struct gfx-drawable ([transform lin?] [children list?] [image symbol?] [frame any/c] [depth any/c])]))

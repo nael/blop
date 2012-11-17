@@ -8,11 +8,13 @@
 
 (define (things . l)
   (map (lambda (tn)
-         (thing tn (gfx-node (constant-lin (vec 300 300) 1 0) (list (gfx-image null))))) l))
+         (thing tn
+                (gfx-node (constant-lin (vec 100 100) 1 0) (list (gfx-node (constant-lin (vec 0 0) 1 0) (list (gfx-image null)))))))
+       l))
 (define boards (make-hash))
 (define event-handlers '())
 (define (thing-drawable t)
-  (car (gfx-node-children (thing-node t))))
+  (car (gfx-node-children (car (gfx-node-children (thing-node t))))))
 (define (register-event matcher handler)
   (define (h evt)
     (when (matcher evt) (handler evt)))
@@ -42,6 +44,7 @@
     (define mid-x (/ (- (/ WIDTH scale) bg-w) 2))
     (define mid-y (/ (- (/ HEIGHT scale) bg-h) 2))
     (let ([tr (lin (vec mid-x mid-y) scale 0)])
+      (printf "pp ~a\n" tr)
       (set-gfx-node-transform! sc (constant tr))
       (gfx-drawable (constant-lin (vec 0 0) 1 0) (list) img (constant 0) (constant 255)))))
 (define current-scene #f)
@@ -63,9 +66,19 @@
   (set-gfx-drawable-image! node tex))
 (define (set-constant-depth! node d)
   (set-gfx-drawable-depth! node (lambda (_) d)))
-
+(define (layer ln d imgname)
+  (define n (gfx-image imgname))
+  (set-gfx-drawable-depth! n (constant d))
+  (thing ln n))
 (board 'ch1/well
-       (background 'fx/ch1/well-dm)
+      (background 'fx/ch1/well/horiz)
+       (layer 'l0 20 'fx/ch1/well/maisons)
+       (layer 'l1 9 'fx/ch1/well/canap)
+       (layer 'l2 8 'fx/ch1/well/serre)
+       (layer 'l3 7 'fx/ch1/well/ferme)
+       (layer 'l4 6 'fx/ch1/well/coffre)
+       (layer 'l5 5 'fx/ch1/well/wellwell)
+       (layer 'l6 4 'fx/ch1/well/cloture)
        (things 'bob 'bill))
 
 
@@ -78,7 +91,7 @@
          [n (thing-drawable t)]
          [boundaries (texture-begin-end anim)])
     (set-tex! n anim)
-    ;(set-gfx-node-transform! n (constant (texture-transform anim)))
+    (set-gfx-node-transform! n (constant (texture-transform anim)))
     (animate! n (current-inexact-milliseconds) 0.008 (car boundaries) (cdr boundaries))))
 
 (define (straight-move-to! start-time thing-name dest speed)
@@ -119,15 +132,27 @@
                  ((a (lambda (t) (start-anim 'bob 'fx/bob-still))) (current-inexact-milliseconds))
                   ))
 (define (byte->meters b near far)
-  (+ near (* (/ (+ b 1) 256) (- far near))))
+  (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
+(define (auto-depth! n depth-map)
+  (define (d t)
+    (define pix (cadr (get-pixel depth-map (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))))
+    (define s (+ (* 9 (- 1 (/ pix 255))) 1) )
+    s)
+  (set-gfx-drawable-depth! (car (gfx-node-children (car (gfx-node-children n)))) d))
 (register-event (lambda (e) (equal? e 'enter ))
                 (lambda (e)
                   (define n (thing-node (thing-by-name 'bob)))
+                  (auto-depth! n 'fx/ch1/well-dm)
                   (define (u t)
-                    (define s (byte->meters (cadr (get-pixel 'fx/ch1/well-dm (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))) 1 10))
-                    (printf "S:~a\n" s)
-                    s
+                    
+                    (define s (byte->meters (cadr (get-pixel 'fx/ch1/well-dm (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))) 1 2))
+
+                    ;(printf "S:~a\n" s)
+                    (/ 1 s)
                     )
-                  (start-anim 'bob 'fx/bob-still)
-                 (set-gfx-node-scale! (car (gfx-node-children n)) u)))
+                  (start-anim 'bob 'fx/bob-walk-left)
+                 (set-gfx-node-scale! (car (gfx-node-children n)) u)
+                  e
+                 ))
+                  
 (provide load-board propagate-event exec-timers-before)
