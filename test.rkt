@@ -13,10 +13,6 @@
 
 (define s (make-scene))
 
-;(steady-rotation! s (current-inexact-milliseconds) 0.001)
-;(define bobn (car (gfx-node-children (car (gfx-node-children s)))))
-;(animate! bobn (current-inexact-milliseconds) 0.01 0 9)
-;(set-constant-depth! bobn -0.3)
 (define (init-view)
   (load-board s 'ch1/well)
   (propagate-event 'enter))

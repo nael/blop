@@ -22,7 +22,7 @@
 
 (define (rad->deg r) (* r (/ 180 pi)))
 
-(define (draw-image image-name frame l dd)
+(define (draw-image image-name frame l d)
   (glMatrixMode GL_MODELVIEW)
   (glLoadIdentity)
   (glScalef (/ 2 WIDTH) (/ 2 HEIGHT) 1)
@@ -34,11 +34,9 @@
 
   (glScalef (texture-w image) (texture-h image) 1)
   (glBindTexture GL_TEXTURE_2D (texture-id image))
-  (cond [(not draw-depth-mode) (glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_MODULATE)]
-        [else  (glTexEnvi GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_COMBINE)
-              (define d (min (max dd 1) 10))
+  (cond [(and (<= d 10) (>= d 1) draw-depth-mode)  (glTexEnvi GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_COMBINE)
               (define c (exact->inexact (- 1 (/ (- d 1) 9))))
-              (printf "DEPTH: ~a ~a\n" c dd)
+;              (printf "DEPTH: ~a ~a\n" c dd)
               (glTexEnvfv GL_TEXTURE_ENV GL_TEXTURE_ENV_COLOR (list->gl-float-vector (list c c c 255)))
               
               (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_RGB GL_REPLACE)
@@ -51,7 +49,8 @@
               (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_ALPHA GL_TEXTURE0)
               (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_ALPHA GL_TEXTURE0)
               (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_ALPHA GL_SRC_ALPHA)
-              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_ALPHA GL_SRC_ALPHA)])
+              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_ALPHA GL_SRC_ALPHA)]
+        [else (glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_MODULATE)])
   
   
   ;(glColor4f 0 255 0 255)
