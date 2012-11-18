@@ -71,14 +71,16 @@
   (set-gfx-drawable-depth! n (constant d))
   (thing ln n))
 (board 'ch1/well
-      (background 'fx/ch1/well/horiz)
+       (background 'fx/ch1/well/horiz)
+       (layer 'lm1 19 'fx/ch1/well-dm)
        (layer 'l0 20 'fx/ch1/well/maisons)
        (layer 'l1 9 'fx/ch1/well/canap)
        (layer 'l2 8 'fx/ch1/well/serre)
        (layer 'l3 7 'fx/ch1/well/ferme)
        (layer 'l4 6 'fx/ch1/well/coffre)
-       (layer 'l5 5 'fx/ch1/well/wellwell)
-       (layer 'l6 4 'fx/ch1/well/cloture)
+       (layer 'l9 5.9 'fx/ch1/well/coffre-ouvert)
+       (layer 'l5 2.5 'fx/ch1/well/wellwell)
+       (layer 'l6 1 'fx/ch1/well/cloture)
        (things 'bob 'bill))
 
 
