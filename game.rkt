@@ -4,7 +4,9 @@
 
 (struct background (image-name))
 (struct board-data (background things))
-(struct thing (name node))
+(struct thing (name
+               node
+               (walk-dest #:mutable #:auto)))
 
 (define (things . l)
   (map (lambda (tn)
@@ -96,12 +98,8 @@
     (set-gfx-node-transform! n (constant (texture-transform anim)))
     (animate! n (current-inexact-milliseconds) 0.008 (car boundaries) (cdr boundaries))))
 
-(define (straight-move-to! start-time thing-name dest speed)
-  (let* ([t (thing-by-name thing-name)]
-         [n (thing-node t)]
-         
-         [start-pos (lin-eval (gfx-node-transform n) start-time)]
-         [dl (normalize (vec- dest (lin-tr start-pos)))]
+(define (straight-move-to! start-time n start-pos dest speed)
+  (let* ([dl (normalize (vec- dest (lin-tr start-pos)))]
          [maxd (norm (vec- dest (lin-tr start-pos)))])
     (define (tr t)
       (let ([d (min (* (- t start-time) speed) maxd)])
@@ -111,9 +109,26 @@
 ; an action is a fun next -> time -> ()
 ; it is supposed to call next when it is completed
 ; which is not nescessarily on the same call stack (maybe at the end of some animation or w/e)
-(define (((straight-move-to thing-name dest speed) next) time)
-  (let ([finish-time (straight-move-to! time thing-name dest speed)])
-    (register-timer finish-time next)))
+(define (((straight-move-to thing-name walk-anims dest speed) next) time)
+  (let* ([thing (thing-by-name thing-name)]
+         [node (thing-node thing)]
+         [start-pos (lin-eval (gfx-node-transform node) time)]
+         [anim (choose-anim walk-anims (lin-tr start-pos) dest)]
+         [walk-anim (car anim)] [still-anim (cdr anim)]
+         [finish-time (straight-move-to! time node start-pos dest speed)])
+    (start-anim thing-name walk-anim)
+    (define (stop-walk t)
+      (when (equal? (thing-walk-dest thing) dest) (start-anim thing-name still-anim))
+      (next t))
+    (set-thing-walk-dest! thing dest)
+    (register-timer finish-time stop-walk)))
+
+; walk anims : '((dir1 . anim1) (dir2 . anim2) ...)
+; directions must be normalized
+(define (choose-anim anims start dest)
+  (let ([d (vec- dest start)])
+    (cdr (argmax (lambda (c) (vec-dot (car c) d)) anims))))
+
 (define timers '())
 (define (register-timer at-time fun)
   (set! timers (cons (cons at-time fun) timers)))
@@ -126,12 +141,15 @@
   (lin-apply (lin-inverse (lin-eval (gfx-node-transform current-scene) t)) u))
 (register-event (lambda (e) (and (pair? e) (equal? 'mouse-click (car e))))
                 (lambda (e)
-                  (start-anim 'bob 'fx/bob-walk-left)
+                  
                   ;(define p (viewport->scene  (current-inexact-milliseconds))) (vec (cadr e) (caddr e))))
                   
                   ;(printf "GPX ~a ~a\n" p (get-pixel 'fx/ch1/well-dm (vec->int-vec p))))
-                  (define a (straight-move-to 'bob (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2))
-                 ((a (lambda (t) (start-anim 'bob 'fx/bob-still))) (current-inexact-milliseconds))
+                  (define walka (list (cons (vec -1 0) (cons 'fx/bob-walk-left 'fx/bob-still-left)) (cons (vec 1 0) (cons 'fx/bob-walk-right 'fx/bob-still-right))))
+                  (((straight-move-to 'bob walka (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2)
+                   (lambda (t) '())) (current-inexact-milliseconds))
+                  ;(define a (straight-move-to 'bob (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2))
+                 ;((a (lambda (t) (start-anim 'bob 'fx/bob-still))) (current-inexact-milliseconds))
                   ))
 (define (byte->meters b near far)
   (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
@@ -141,6 +159,8 @@
     (define s (+ (* 9 (- 1 (/ pix 255))) 1) )
     s)
   (set-gfx-drawable-depth! (car (gfx-node-children (car (gfx-node-children n)))) d))
+
+
 (register-event (lambda (e) (equal? e 'enter ))
                 (lambda (e)
                   (define n (thing-node (thing-by-name 'bob)))
@@ -152,7 +172,7 @@
                     ;(printf "S:~a\n" s)
                     (/ 1 s)
                     )
-                  (start-anim 'bob 'fx/bob-walk-left)
+                  (start-anim 'bob 'fx/bob-still)
                  (set-gfx-node-scale! (car (gfx-node-children n)) u)
                   e
                  ))

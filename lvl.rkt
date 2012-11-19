@@ -7,7 +7,10 @@
 (define BOB (list "1.png" "2.png" "3.png" "4.png" "5.png" "6.png" "7.png" "8.png" "9.png"))
 (define bb (list "ass/1.png"))
 (register-image 'fx/bob-walk-left 'begin 'end (map ((curry string-append) "ass/") BOB) #:offset (vec -200 -100) #:scale 0.4)
+(register-image 'fx/bob-walk-right 0 9 'fx/bob-walk-left #:x-flip? #t)
 (register-image 'fx/bob-still 0 0 'fx/bob-walk-left)
+(register-image 'fx/bob-still-left 0 0 'fx/bob-walk-left)
+(register-image 'fx/bob-still-right 0 0 'fx/bob-walk-left #:x-flip? #t)
 (register-image 'fx/ch1/well-bg 'begin 'end (list "ass/bg.bmp"))
 (register-image 'fx/ch1/well-dm 'begin 'end (list "ass/well_dm.bmp"))
 

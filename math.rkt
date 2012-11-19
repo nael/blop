@@ -25,10 +25,12 @@
   (lin-compose (lin-rotation (- (lin-angle f))) ; too tired to compute
                (lin-compose (lin-translation (vec* -1 (lin-tr f)))
                             (lin-hom (/ 1 (lin-scale f))))))
+(define (vec-dot u v)
+  (+ (* (vec-x u) (vec-x v)) (* (vec-y u) (vec-y v))))
 (define lin-id (lin (vec 0 0) 1 0))
 (define (lin-rotation t) (lin (vec 0 0) 1 t))
 (define (lin-translation u) (lin u 1 0))
 (define (lin-hom l) (lin (vec 0 0) l 0))
 (define (vec->int-vec u)
   (vec (inexact->exact (round (vec-x u))) (inexact->exact (round (vec-y u)))))
-(provide (struct-out vec) (struct-out lin) lin-apply lin-id norm normalize vec* vec+ vec- rotate lin-compose vec->int-vec lin-inverse)
+(provide (struct-out vec) (struct-out lin) lin-apply lin-id norm normalize vec* vec+ vec- rotate lin-compose vec->int-vec lin-inverse vec-dot)

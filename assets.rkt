@@ -5,18 +5,19 @@
          ffi/cvector ffi/unsafe ffi/unsafe/cvector
          )
 (require "math.rkt")
-(struct texture (id w h sw sh) #:transparent)
+(struct texture (id w h sw sh (x-flip? #:mutable)))
 (define (load-image fn)
   (let ([b (make-object bitmap% fn 'unknown/alpha)])
     (if (send b ok?) b (raise (string-append "failed to load image " fn)))))
 
 (define texture-paths (make-hash))
-(define (register-image name begin-frame end-frame path #:offset [offset (vec 0 0)] #:scale [scale 1])
+(define (register-image name begin-frame end-frame path #:offset [offset (vec 0 0)] #:scale [scale 1] #:x-flip? [x-flip? #f])
   (define (cv f)
     (cond [(equal? f 'begin) 0]
            [(equal? f 'end) (sub1 (length path))]
            [else f]))
   (hash-set! texture-paths name path)
+  (hash-set! texture-xf name x-flip?)
   (hash-set! texture-transforms name (if (symbol? path) (texture-transform path) (lin offset scale 0)))
   (hash-set! texture-frames name (cons (cv begin-frame) (cv end-frame))))
 
@@ -36,7 +37,7 @@
             (lambda ()
               (let ([path (hash-ref texture-paths name)])
                 (if (symbol? path)
-                    (texture-by-name path)
+                    (let ([tt (struct-copy texture (texture-by-name path))]) (set-texture-x-flip?! tt (hash-ref texture-xf name)) tt)
                     (load-tex path))))))
 (define (get-pixel image-name pos)
   (let* ([tex (texture-by-name image-name)]; inefficient, we force the loading of the tex in the gfx mem
@@ -51,6 +52,7 @@
 ; todo remove all the dirty hashes
 (define texture-frames (make-hash))
 (define texture-transforms (make-hash))
+(define texture-xf (make-hash))
 (define (texture-transform name) (hash-ref texture-transforms name))
 (define (texture-begin-end name)
   (hash-ref texture-frames name))
@@ -91,7 +93,7 @@
     (printf "WH ~a ~a\n" w h)
     (for ([frame data] [i (in-range 0 n)])
       (glTexSubImage2D GL_TEXTURE_2D 0 (* (modulo i line-size) w) (* (quotient i line-size) h) w h GL_BGRA GL_UNSIGNED_BYTE frame))
-    (texture tex w h (/ 1 line-size) (/ 1 line-count))))
+    (texture tex w h (/ 1 line-size) (/ 1 line-count) #f)))
     ;k(texture tex w h 1 1)))
 
 

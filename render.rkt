@@ -18,7 +18,7 @@
 ; ==
 (define (gfx-node-add n c)
   (set-gfx-node-children! n (cons c (gfx-node-children n))))
-(define draw-depth-mode #t);todo make this clean way
+(define draw-depth-mode #f);todo make this clean way
 
 (define (rad->deg r) (* r (/ 180 pi)))
 
@@ -54,9 +54,15 @@
   
   
   ;(glColor4f 0 255 0 255)
-  (let ([sx (texture-x-coord image frame)] [sy (texture-y-coord image frame)])
-    (let ([tx1 (* sx (texture-sw image))] [ty1 (* sy (texture-sh image))])
-      (draw-quad tx1 ty1 (+ tx1 (texture-sw image)) (+ ty1 (texture-sh image))))))
+  (let* ([sx (texture-x-coord image frame)]
+         [sy (texture-y-coord image frame)]
+         [tx1 (* sx (texture-sw image))]
+         [ty1 (* sy (texture-sh image))]
+         [tx2 (+ tx1 (texture-sw image)) ]
+         [ty2 (+ ty1 (texture-sh image))])
+      (if (texture-x-flip? image)
+          (draw-quad tx2 ty1 tx1 ty2)
+          (draw-quad tx1 ty1 tx2 ty2))))
 (define (set-gfx-node-scale! n s)
   (set-gfx-node-transform! n (struct-copy lin (gfx-node-transform n) [scale s])))
 (define (set-gfx-node-translation! n t)
@@ -147,10 +153,12 @@
           (resize width height))))
     
     (super-instantiate () (style '(gl)))))
-(define WIDTH 1400)
-(define HEIGHT 700)
+;(define WIDTH 1400)
+;(define HEIGHT 700)
+(define-values (WIDTH HEIGHTX) (get-display-size))
+(define HEIGHT (+ HEIGHTX 60))
 (define (make-view s init-cb event-cb timer-cb)
-  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list))))
+  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list 'no-resize-border 'float 'hide-menu-bar 'no-caption))))
   (define gl  (new my-canvas% [parent win] [scene s] [init-cb init-cb] [event-cb event-cb] [timer-cb timer-cb]))
   (send win show #t))
 
