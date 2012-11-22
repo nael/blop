@@ -5,7 +5,7 @@
          racket/gui ffi/cvector
          "assets.rkt"
          )
-(require "lvl.rkt" "render.rkt" "game.rkt" "math.rkt")
+(require "lvl.rkt" "render.rkt" "game.rkt" "math.rkt" "gui.rkt")
 
 
 (define (make-scene)
@@ -19,3 +19,6 @@
 (define (timers t)
   (exec-timers-before t))
 (make-view s init-view propagate-event timers)
+(define-namespace-anchor blop-top-level-ns)
+(parameterize ([current-namespace (namespace-anchor->namespace blop-top-level-ns)])
+  (graphical-read-eval-print-loop))

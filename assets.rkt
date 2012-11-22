@@ -39,6 +39,10 @@
                 (if (symbol? path)
                     (let ([tt (struct-copy texture (texture-by-name path))]) (set-texture-x-flip?! tt (hash-ref texture-xf name)) tt)
                     (load-tex path))))))
+(define (image-w image-name)
+  (texture-w (texture-by-name image-name)))
+(define (image-h image-name)
+  (texture-h (texture-by-name image-name))); equally as bad as below
 (define (get-pixel image-name pos)
   (let* ([tex (texture-by-name image-name)]; inefficient, we force the loading of the tex in the gfx mem
          [w (texture-w tex)] [h (texture-h tex)]
@@ -120,4 +124,4 @@
       (make-tex-argb w h (map  (lambda (b) (make-cvector* b _ubyte (bytes-length b))) (map caddr images))))))
 
 (provide (struct-out texture)
-         get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord load-image)
+         get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord image-by-name load-image image-w image-h)

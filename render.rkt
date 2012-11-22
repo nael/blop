@@ -153,12 +153,12 @@
           (resize width height))))
     
     (super-instantiate () (style '(gl)))))
-;(define WIDTH 1400)
-;(define HEIGHT 700)
-(define-values (WIDTH HEIGHTX) (get-display-size))
-(define HEIGHT (+ HEIGHTX 60))
+(define WIDTH 1400)
+(define HEIGHT 700)
+;(define-values (WIDTH HEIGHTX) (get-display-size))
+;(define HEIGHT (+ HEIGHTX 60))
 (define (make-view s init-cb event-cb timer-cb)
-  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list 'no-resize-border 'float 'hide-menu-bar 'no-caption))))
+  (define win (new frame% (label "$") (min-width WIDTH) (min-height HEIGHT) (style (list 'no-resize-border 'float 'hide-menu-bar #|'no-caption|#))))
   (define gl  (new my-canvas% [parent win] [scene s] [init-cb init-cb] [event-cb event-cb] [timer-cb timer-cb]))
   (send win show #t))
 

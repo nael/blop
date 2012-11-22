@@ -90,6 +90,7 @@
 (define (current-board) (hash-ref boards current-board-name))
 (define (thing-by-name name)
   (hash-ref (board-data-things (current-board)) name))
+
 (define (start-anim thing-name anim)
   (let* ([t (thing-by-name thing-name)]
          [n (thing-drawable t)]
@@ -109,6 +110,17 @@
 ; an action is a fun next -> time -> ()
 ; it is supposed to call next when it is completed
 ; which is not nescessarily on the same call stack (maybe at the end of some animation or w/e)
+(define (((par . actions) next) time)
+  (define act-finished 0)
+  (define act-count (length actions))
+  (define (end-callback t)
+    (set! act-finished (add1 act-finished)) ; todo race condition, no MT now but could be
+    (when (equal? act-count act-finished)
+      (next t)))
+  (for ([a actions])
+    ((a end-callback) time)))
+(define (do-action a t)
+  ((a (lambda (t) '())) t))
 (define (((straight-move-to thing-name walk-anims dest speed) next) time)
   (let* ([thing (thing-by-name thing-name)]
          [node (thing-node thing)]
@@ -139,18 +151,22 @@
 (register-event (lambda (_) #t) (lambda (e) (printf "event: ~a\n" e)))
 (define (viewport->scene t u)
   (lin-apply (lin-inverse (lin-eval (gfx-node-transform current-scene) t)) u))
+
+                    
+(define walka (list (cons (vec -1 0) (cons 'fx/bob-walk-left 'fx/bob-still-left)) (cons (vec 1 0) (cons 'fx/bob-walk-right 'fx/bob-still-right))))
 (register-event (lambda (e) (and (pair? e) (equal? 'mouse-click (car e))))
                 (lambda (e)
-                  
+                  (do-action
+                   (straight-move-to 'bob walka (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2)
+                   (current-inexact-milliseconds)))
                   ;(define p (viewport->scene  (current-inexact-milliseconds))) (vec (cadr e) (caddr e))))
                   
                   ;(printf "GPX ~a ~a\n" p (get-pixel 'fx/ch1/well-dm (vec->int-vec p))))
-                  (define walka (list (cons (vec -1 0) (cons 'fx/bob-walk-left 'fx/bob-still-left)) (cons (vec 1 0) (cons 'fx/bob-walk-right 'fx/bob-still-right))))
-                  (((straight-move-to 'bob walka (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2)
-                   (lambda (t) '())) (current-inexact-milliseconds))
+                  ;(((straight-move-to 'bob walka (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2)
+                  ; (lambda (t) '())) (current-inexact-milliseconds))
                   ;(define a (straight-move-to 'bob (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))) 0.2))
                  ;((a (lambda (t) (start-anim 'bob 'fx/bob-still))) (current-inexact-milliseconds))
-                  ))
+                  )
 (define (byte->meters b near far)
   (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
 (define (auto-depth! n depth-map)
@@ -177,4 +193,4 @@
                   e
                  ))
                   
-(provide load-board propagate-event exec-timers-before)
+(provide thing-by-name load-board propagate-event exec-timers-before)
