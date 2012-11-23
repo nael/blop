@@ -21,6 +21,7 @@
 (register-static 'fx/ch1/well/ferme "ass/well/5.png")
 (register-static 'fx/ch1/well/coffre "ass/well/6.png")
 (register-static 'fx/ch1/well/coffre-ouvert "ass/well/7.png")
+(register-static 'fx/ch1/well/wellwell-cm "ass/well/8_cm.png")
 (register-static 'fx/ch1/well/wellwell "ass/well/8.png")
 (register-static 'fx/ch1/well/cloture "ass/well/9.png")
 (register-static 'pixel "ass/sq.bmp")
