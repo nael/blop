@@ -43,6 +43,7 @@
   (texture-w (texture-by-name image-name)))
 (define (image-h image-name)
   (texture-h (texture-by-name image-name))); equally as bad as below
+
 (define (get-pixel image-name pos)
   (let* ([tex (texture-by-name image-name)]; inefficient, we force the loading of the tex in the gfx mem
          [w (texture-w tex)] [h (texture-h tex)]

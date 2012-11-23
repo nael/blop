@@ -9,7 +9,7 @@
 ; a simple render tree
 (struct gfx-node ((transform #:mutable)
                   (children #:mutable)))
-(struct gfx-drawable gfx-node ((image #:mutable) (frame #:mutable) (depth #:mutable)))
+(struct gfx-drawable gfx-node ((image #:mutable) (frame #:mutable) (depth #:mutable) (colorize #:mutable #:auto)))
 (define (constant-lin t s a)
   (lin (constant t) (constant s) (constant a)))
 (define (gfx-image image) (gfx-drawable (constant-lin (vec 0 0) 1 0) null image (constant 0) (constant 0)))
@@ -18,11 +18,17 @@
 ; ==
 (define (gfx-node-add n c)
   (set-gfx-node-children! n (cons c (gfx-node-children n))))
+(define (gfx-node-remove n c)
+  (set-gfx-node-children! n (remove c (gfx-node-children n))))
+(define (gfx-node-remove-all n cs)
+  (for-each ((curry gfx-node-remove) n) cs))
 (define draw-depth-mode #f);todo make this clean way
 
 (define (rad->deg r) (* r (/ 180 pi)))
 
-(define (draw-image image-name frame l d)
+
+
+(define (draw-image image-name colorize frame l d)
   (glMatrixMode GL_MODELVIEW)
   (glLoadIdentity)
   (glScalef (/ 2 WIDTH) (/ 2 HEIGHT) 1)
@@ -33,23 +39,25 @@
   (glRotatef (rad->deg (lin-angle l)) 0 0 1)
 
   (glScalef (texture-w image) (texture-h image) 1)
+  ;(and (<= d 10) (>= d 1) draw-depth-mode)
   (glBindTexture GL_TEXTURE_2D (texture-id image))
-  (cond [(and (<= d 10) (>= d 1) draw-depth-mode)  (glTexEnvi GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_COMBINE)
-              (define c (exact->inexact (- 1 (/ (- d 1) 9))))
-;              (printf "DEPTH: ~a ~a\n" c dd)
-              (glTexEnvfv GL_TEXTURE_ENV GL_TEXTURE_ENV_COLOR (list->gl-float-vector (list c c c 255)))
-              
-              (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_RGB GL_REPLACE)
-              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_RGB GL_CONSTANT)
-              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_RGB GL_CONSTANT)
-              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_RGB GL_SRC_COLOR)
-              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_RGB GL_SRC_COLOR)
-              
-              (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_ALPHA GL_REPLACE)
-              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_ALPHA GL_TEXTURE0)
-              (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_ALPHA GL_TEXTURE0)
-              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_ALPHA GL_SRC_ALPHA)
-              (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_ALPHA GL_SRC_ALPHA)]
+  (cond [colorize (glTexEnvi GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_COMBINE)
+                  (define c (exact->inexact (- 1 (/ (- d 1) 9))))
+                  ;              (printf "DEPTH: ~a ~a\n" c dd)
+                  (glTexEnvfv GL_TEXTURE_ENV GL_TEXTURE_ENV_COLOR (list->gl-float-vector colorize))
+                  
+                  (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_RGB GL_REPLACE)
+                  (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_RGB GL_CONSTANT)
+                  (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_RGB GL_CONSTANT)
+                  (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_RGB GL_SRC_COLOR)
+                  (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_RGB GL_SRC_COLOR)
+                  
+                  (glTexEnvi GL_TEXTURE_ENV GL_COMBINE_ALPHA GL_REPLACE)
+                  (glTexEnvi GL_TEXTURE_ENV GL_SOURCE0_ALPHA GL_TEXTURE0)
+                  (glTexEnvi GL_TEXTURE_ENV GL_SOURCE1_ALPHA GL_TEXTURE0)
+                  (glTexEnvi GL_TEXTURE_ENV GL_OPERAND0_ALPHA GL_SRC_ALPHA)
+                  (glTexEnvi GL_TEXTURE_ENV GL_OPERAND1_ALPHA GL_SRC_ALPHA)]
+        
         [else (glTexEnvf GL_TEXTURE_ENV GL_TEXTURE_ENV_MODE GL_MODULATE)])
   
   
@@ -75,7 +83,11 @@
     (let ([cur (lin-compose ltr (lin-eval (gfx-node-transform node) at-time))])
       (append* (if (and (gfx-drawable? node) (not (null? (gfx-drawable-image node))))
                    (list (cons ((gfx-drawable-depth node) at-time)
-                               (lambda () (draw-image (gfx-drawable-image node) ((gfx-drawable-frame node) at-time) cur ((gfx-drawable-depth node) at-time)))))
+                               (lambda () (draw-image (gfx-drawable-image node)
+                                                      (gfx-drawable-colorize node)
+                                                      ((gfx-drawable-frame node) at-time)
+                                                      cur
+                                                      ((gfx-drawable-depth node) at-time)))))
                    (list))
                (for/list ([c (gfx-node-children node)])
                          (render-node c cur)))))
@@ -136,6 +148,7 @@
          (timer-cb (current-inexact-milliseconds))
          (draw-opengl scene)
          (swap-gl-buffers)
+         (sleep/yield 0.01)
          (queue-callback (lambda () (refresh)) #f))))
     
     (define/override (on-char key-event)
@@ -163,7 +176,7 @@
   (send win show #t))
 
 (provide WIDTH HEIGHT constant-lin set-gfx-node-scale! set-gfx-node-translation! gfx-node-add constant make-view gfx-image  lin-eval)
-
-(provide (contract-out 
+(provide (struct-out gfx-node) (struct-out gfx-drawable) gfx-node-remove gfx-node-remove-all)
+#|(provide (contract-out 
           [struct gfx-node ([transform lin?] [children list?])]
-          [struct gfx-drawable ([transform lin?] [children list?] [image symbol?] [frame any/c] [depth any/c])]))
+          [struct gfx-drawable ([transform lin?] [children list?] [image symbol?] [frame any/c] [depth any/c] [colorize any/c])]))|#

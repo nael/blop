@@ -11,7 +11,7 @@
 (register-image 'fx/bob-still 0 0 'fx/bob-walk-left)
 (register-image 'fx/bob-still-left 0 0 'fx/bob-walk-left)
 (register-image 'fx/bob-still-right 0 0 'fx/bob-walk-left #:x-flip? #t)
-(register-image 'fx/ch1/well-bg 'begin 'end (list "ass/bg.bmp"))
+(register-image 'fx/ch1/well-bg 'begin 'end (list "ass/bg.png"))
 (register-image 'fx/ch1/well-dm 'begin 'end (list "ass/well_dm.bmp"))
 
 (register-static 'fx/ch1/well/horiz "ass/well/1.png")
@@ -23,6 +23,7 @@
 (register-static 'fx/ch1/well/coffre-ouvert "ass/well/7.png")
 (register-static 'fx/ch1/well/wellwell "ass/well/8.png")
 (register-static 'fx/ch1/well/cloture "ass/well/9.png")
+(register-static 'pixel "ass/sq.bmp")
 ;(register-image 'fx/bob-still 'begin 'end (map ((curry string-append) "ass/") BOB))
 ;(register-image 'fx/bob-walk-left 0 0 bb)
 ;(register-image 'fx/bob-well-background 0 0 bb)
