@@ -3,25 +3,42 @@
 (require "assets.rkt" "lvl.rkt" "math.rkt")
 
 (displayln "go !")
-(define sqw 80)
+(define sqw 40)
+
+; a collision map is a set of points which are obstacles for at most a sqw-sided square
+; the pf graph is a hash map posn -> vertex state
 
 ; I is image-name
-(define (build-grid-from-image I)
+(define (build-cmap-from-image I)
   (define i (image-by-name I))
   (define (check-square x y)
-    (for*/and ([dx (in-range 0 sqw)]
-               [dy (in-range 0 sqw)])
+    (for*/and ([dx (in-range (- (/ sqw 2)) (/ sqw 2))]
+               [dy (in-range (- (/ sqw 2)) (/ sqw 2))])
       (zero? (car (get-pixel I (vec (+ x dx) (+ y dy)))))))
   (define _ 0)
   (define pos-hash (make-hash))
-  (for* ([y (in-range 1 (- (image-h I) sqw) sqw)]
-         [x (in-range 0 (- (image-w I) 1) sqw)]
+  (for* ([y (in-range (- (* 2 sqw)) (+ (image-h I) (* 2 sqw)) sqw)]
+         [x (in-range (- (* 2 sqw)) (+ (image-w I) (* 2 sqw) 1) sqw)]
          #:when (check-square x y))
     (hash-set! pos-hash (vec x y) (cons +inf.0 #f)))
-  pos-hash)
+  (transform-grid pos-hash (texture-transform I)))
+(define (combine-grids x0 y0 w h g1 g2)
+  (define gc (make-hash))
+  (for* ([y (in-range (+ x0 (/ sqw 2)) (- h (/ sqw 2)) sqw)]
+         [x (in-range (+ y0 (/ sqw 2)) (- w (/ sqw 2) 1) sqw)])
+    (define (ok? g)
+      (<= (norm (vec- (vec x y) (grid-nearest g (vec x y)))) (/ sqw 2)))
+    (when (and (ok? g1) (ok? g2))
+      (hash-set! gc (vec x y) (cons +inf.0 #f))))
+  gc)
 (define (grid-nearest g u)
   (argmin (lambda (v) (norm (vec- u v))) (hash-keys g)))
-
+(define (transform-grid g f)
+  (define res (make-hash))
+  (hash-for-each g
+                 (lambda (k v)
+                   (hash-set! res (lin-apply f k) v)))
+  res)
 
 
 (define (insert-sorted cmp lst n)
@@ -79,5 +96,5 @@
 ;(displayln pos-hash)
 ;(define f (car (hash-keys pos-hash)))
 ;(djs f (vec+ f (vec sqw (* 2 sqw))))
-(provide build-grid-from-image grid-nearest djs)
+(provide build-grid-from-image grid-nearest djs combine-grids)
 ;(define st (make-heap ()))

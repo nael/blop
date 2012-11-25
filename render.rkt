@@ -4,7 +4,7 @@
          (lib "gl-vectors.ss" "sgl")
          racket/gui ffi/cvector
          )
-(require "math.rkt" "assets.rkt")
+(require "math.rkt" "assets.rkt" "utils.rkt")
 
 ; a simple render tree
 (struct gfx-node ((transform #:mutable)
@@ -86,7 +86,7 @@
                                (lambda () (draw-image (gfx-drawable-image node)
                                                       (gfx-drawable-colorize node)
                                                       ((gfx-drawable-frame node) at-time)
-                                                      cur
+                                                      (lin-compose cur (texture-transform (gfx-drawable-image node)))
                                                       ((gfx-drawable-depth node) at-time)))))
                    (list))
                (for/list ([c (gfx-node-children node)])
@@ -142,14 +142,15 @@
     (define/override (on-paint)
       (with-gl-context
        (lambda ()
-         (unless init?
-           (init-cb)
-           (set! init? #t))
-         (timer-cb (current-inexact-milliseconds))
-         (draw-opengl scene)
-         (swap-gl-buffers)
-         (sleep/yield 0.01)
-         (queue-callback (lambda () (refresh)) #f))))
+         ;(call-with-exception-handler default-exn-handler ; not really working but solves problem anyway
+           (unless init?
+             (init-cb)
+             (set! init? #t))
+           (timer-cb (current-inexact-milliseconds))
+           (draw-opengl scene)
+           (swap-gl-buffers)
+           (sleep/yield 0.01)
+           (queue-callback (lambda () (refresh)) #f))))
     
     (define/override (on-char key-event)
       (display "key evt ")

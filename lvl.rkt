@@ -19,6 +19,7 @@
 (register-static 'fx/ch1/well/canap "ass/well/3.png")
 (register-static 'fx/ch1/well/serre "ass/well/4.png")
 (register-static 'fx/ch1/well/ferme "ass/well/5.png")
+(register-static 'fx/ch1/well/ferme-cm "ass/well/5_cm.png")
 (register-static 'fx/ch1/well/coffre "ass/well/6.png")
 (register-static 'fx/ch1/well/coffre-ouvert "ass/well/7.png")
 (register-static 'fx/ch1/well/wellwell-cm "ass/well/8_cm.png")

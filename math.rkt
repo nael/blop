@@ -33,4 +33,4 @@
 (define (lin-hom l) (lin (vec 0 0) l 0))
 (define (vec->int-vec u)
   (vec (inexact->exact (round (vec-x u))) (inexact->exact (round (vec-y u)))))
-(provide (struct-out vec) (struct-out lin) lin-apply lin-id norm normalize vec* vec+ vec- rotate lin-compose vec->int-vec lin-inverse vec-dot)
+(provide (struct-out vec) (struct-out lin) lin-apply lin-id norm normalize vec* vec+ vec- rotate lin-compose vec->int-vec lin-inverse lin-translation lin-rotation lin-hom vec-dot)

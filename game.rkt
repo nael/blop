@@ -1,6 +1,8 @@
 #lang racket
 
-(require "render.rkt" "assets.rkt" "math.rkt")
+(require "render.rkt" "assets.rkt" "math.rkt" "pf.rkt")
+
+; board definitions
 
 (struct background (image-name))
 (struct board-data (background things))
@@ -14,15 +16,18 @@
                 (gfx-node (constant-lin (vec 100 100) 1 0) (list (gfx-node (constant-lin (vec 0 0) 1 0) (list (gfx-image null)))))))
        l))
 (define boards (make-hash))
-(define event-handlers '())
+
 (define (thing-drawable t)
   (car (gfx-node-children (car (gfx-node-children (thing-node t))))))
-(define (register-event matcher handler)
-  (define (h evt)
-    (when (matcher evt) (handler evt)))
-  (set! event-handlers (cons h event-handlers)))
-(define (propagate-event e)
-  (for ([h event-handlers]) (h e)))
+
+(define (viewport->scene t u)
+  (lin-apply (lin-inverse (lin-eval (gfx-node-transform current-scene) t)) u))
+
+(define (layer ln d imgname)
+  (define n (gfx-image imgname))
+  (set-gfx-drawable-depth! n (constant d))
+  (thing ln n))
+
 (define (board name . elements)
   (define bg #f)
   (define things (make-hash))
@@ -36,20 +41,23 @@
             [else (error name "unknown element : ~a" e)])))
   (populate elements)
   (hash-set! boards name (board-data bg things)))
+
 ; modify the root node sc to scale and offset so that the background is maxed
 ; then returns a background node with the image
 (define (make-bg-node sc img)
   (let* ([tex (texture-by-name img)]
          [bg-w (texture-w tex)] [bg-h (texture-h tex)])
     (define scale (exact->inexact (min (/ WIDTH bg-w) (/ HEIGHT bg-h))))
-    ;(printf "Dim ~a\n" scale)
     (define mid-x (/ (- (/ WIDTH scale) bg-w) 2))
     (define mid-y (/ (- (/ HEIGHT scale) bg-h) 2))
     (let ([tr (lin (vec mid-x mid-y) scale 0)])
-      (printf "pp ~a\n" tr)
       (set-gfx-node-transform! sc (constant tr))
       (gfx-drawable (constant-lin (vec 0 0) 1 0) (list) img (constant 0) (constant 255)))))
 (define current-scene #f)
+(define current-board-name 'none)
+(define (current-board) (hash-ref boards current-board-name))
+(define (thing-by-name name)
+  (hash-ref (board-data-things (current-board)) name))
 (define (load-board s bname)
   (set! current-board-name bname)
   (set! current-scene s)
@@ -57,6 +65,10 @@
   (unless (equal? (board-data-background b) #f) (gfx-node-add s (make-bg-node s (board-data-background b))))
   (for ([(_ t) (board-data-things b)])
     (gfx-node-add s (thing-node t))))
+
+
+
+; node manipulation
 
 (define (animate! node start-time rate begin end)
   (define (frame time)
@@ -68,10 +80,46 @@
   (set-gfx-drawable-image! node tex))
 (define (set-constant-depth! node d)
   (set-gfx-drawable-depth! node (lambda (_) d)))
-(define (layer ln d imgname)
-  (define n (gfx-image imgname))
-  (set-gfx-drawable-depth! n (constant d))
-  (thing ln n))
+(define (colorize! thing-name color)
+  (set-gfx-drawable-colorize! (thing-drawable (thing-by-name thing-name)) color))
+; returns the end time
+(define (straight-move-to! start-time n start-pos dest speed)
+  (if (equal? (lin-tr start-pos) dest)
+      (begin (set-gfx-node-translation! n (constant (lin-tr start-pos))) start-time)
+      (let* ([dl (normalize (vec- dest (lin-tr start-pos)))]
+             [maxd (norm (vec- dest (lin-tr start-pos)))])
+        (define (tr t)
+          (let ([d (min (* (- t start-time) speed) maxd)])
+            (vec+ (lin-tr start-pos) (vec* d dl))))
+        (set-gfx-node-translation! n tr)
+        (+ start-time (/ maxd speed)))))
+; sets the depth of d from the position of n onto the depth-map
+(define (auto-depth! n depth-map)
+  (define (d t)
+    (define pix (cadr (get-pixel depth-map (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))))
+    (define s (+ (* 9 (- 1 (/ pix 255))) 1) )
+    s)
+  (set-gfx-drawable-depth! (car (gfx-node-children (car (gfx-node-children n)))) d));todo ugly
+
+
+; event handling
+
+(define event-handlers '())
+(define (register-event matcher handler)
+  (define (h evt)
+    (when (matcher evt) (handler evt)))
+  (set! event-handlers (cons h event-handlers)))
+(define (propagate-event e)
+  (for ([h event-handlers]) (h e)))
+(define timers '())
+(define (register-timer at-time fun)
+  (set! timers (cons (cons at-time fun) timers)))
+(define (exec-timers-before at)
+  (let-values ([(x nx) (partition (lambda (t) (<= (car t) at)) timers)])
+    (set! timers nx) ; do it now in case someone wants to register a timer in a timer
+    (for-each (lambda (t) ((cdr t) at)) x)))
+
+
 (board 'ch1/well
        (background 'fx/ch1/well/horiz)
        ;(layer 'lm1 19 'fx/ch1/well-background)
@@ -85,35 +133,13 @@
        (layer 'l6 1 'fx/ch1/well/cloture)
        (things 'bob 'bill))
 
+; actions, chaining ...
 
-(define current-board-name 'none)
-(define (current-board) (hash-ref boards current-board-name))
-(define (thing-by-name name)
-  (hash-ref (board-data-things (current-board)) name))
-
-(define (start-anim thing-name anim)
-  (let* ([t (thing-by-name thing-name)]
-         [n (thing-drawable t)]
-         [boundaries (texture-begin-end anim)])
-    (set-tex! n anim)
-    (set-gfx-node-transform! n (constant (texture-transform anim)))
-    (animate! n (current-inexact-milliseconds) 0.008 (car boundaries) (cdr boundaries))))
-(define (start-or-continue-anim thing-name anim)
-  (unless (equal? anim (gfx-drawable-image (thing-drawable (thing-by-name thing-name))))
-    (start-anim thing-name anim)))
-(define (straight-move-to! start-time n start-pos dest speed)
-  (if (equal? (lin-tr start-pos) dest)
-      (begin (set-gfx-node-translation! n (constant (lin-tr start-pos))) start-time)
-      (let* ([dl (normalize (vec- dest (lin-tr start-pos)))]
-             [maxd (norm (vec- dest (lin-tr start-pos)))])
-        (define (tr t)
-          (let ([d (min (* (- t start-time) speed) maxd)])
-            (vec+ (lin-tr start-pos) (vec* d dl))))
-        (set-gfx-node-translation! n tr)
-        (+ start-time (/ maxd speed)))))
 ; an action is a fun next -> time -> ()
 ; it is supposed to call next when it is completed
 ; which is not nescessarily on the same call stack (maybe at the end of some animation or w/e)
+
+; plays all the actions in parallel
 (define (((par . actions) next) time)
   (define act-finished 0)
   (define act-count (length actions))
@@ -125,6 +151,32 @@
     ((a end-callback) time)))
 (define (do-action a t)
   ((a (lambda (t) '())) t))
+
+; plays all the actions chained
+(define (seq . acts) (seq-list acts))
+(define (((seq-list acts) next) t)
+  (cond [(null? acts) (next t)]
+        [else (((car acts) ((seq-list (cdr acts)) next)) t)]))
+
+(define ((do-nothing next) t) #f)
+
+
+
+; moving, walking
+
+(define (start-anim thing-name anim)
+  (let* ([t (thing-by-name thing-name)]
+         [n (thing-drawable t)]
+         [boundaries (texture-begin-end anim)])
+    (set-tex! n anim)
+    ;(set-gfx-node-transform! n (constant (texture-transform anim)))
+    (animate! n (current-inexact-milliseconds) 0.008 (car boundaries) (cdr boundaries))))
+(define (start-or-continue-anim thing-name anim)
+  (unless (equal? anim (gfx-drawable-image (thing-drawable (thing-by-name thing-name))))
+    (start-anim thing-name anim)))
+
+; walk animations : '((dir1 . anim1) (dir2 . anim2) ...)
+; with normalized directions
 (define (((straight-move-to thing-name walk-anims dest speed stop?) next) time)
   (let* ([thing (thing-by-name thing-name)]
          [node (thing-node thing)]
@@ -134,45 +186,25 @@
          [finish-time (straight-move-to! time node start-pos dest speed)])
     (start-or-continue-anim thing-name walk-anim)
     (define (stop-walk t)
-      (printf "stopwalk called\n")
       (when (equal? (thing-walk-dest thing) dest)
         (when stop? (start-anim thing-name still-anim))
         (next t)))
     (set-thing-walk-dest! thing dest)
-    (printf "Registering stop walk timer in ~a ms\n" (- (current-inexact-milliseconds) finish-time))
     (register-timer finish-time stop-walk)))
-
-; walk anims : '((dir1 . anim1) (dir2 . anim2) ...)
-; directions must be normalized
 (define (choose-anim anims start dest)
   (let ([d (vec- dest start)])
     (cdr (argmax (lambda (c) (vec-dot (car c) d)) anims))))
-
-(define timers '())
-(define (register-timer at-time fun)
-  (set! timers (cons (cons at-time fun) timers)))
-(define (exec-timers-before at)
-  (let-values ([(x nx) (partition (lambda (t) (<= (car t) at)) timers)])
-    (set! timers nx) ; do it now in case someone wants to register a timer in a timer
-    (for-each (lambda (t) ((cdr t) at)) x)))
-(register-event (lambda (_) #t) (lambda (e) (printf "event: ~a\n" e)))
-(define (viewport->scene t u)
-  (lin-apply (lin-inverse (lin-eval (gfx-node-transform current-scene) t)) u))
-
-(define (colorize! thing-name color)
-  (set-gfx-drawable-colorize! (thing-drawable (thing-by-name thing-name)) color))
-
 (define (walk-straight thing-name dest)
-  (straight-move-to thing-name walka dest 0.2 #f))
+  (straight-move-to thing-name walka dest 0.22 #f))
 (define (walk-straight-and-stop thing-name dest)
-  (straight-move-to thing-name walka dest 0.2 #t))
+  (straight-move-to thing-name walka dest 0.22 #t))
 
-(define (((seq-list acts) next) t)
-  (cond [(null? acts) (next t)]
-        [else (((car acts) ((seq-list (cdr acts)) next)) t)]))
-(define (seq . acts) (seq-list acts))
-(define ((do-nothing next) t) #f)
+
 (define walka (list (cons (vec -1 0) (cons 'fx/bob-walk-left 'fx/bob-still-left)) (cons (vec 1 0) (cons 'fx/bob-walk-right 'fx/bob-still-right))))
+
+
+; pathfinding
+
 (define dl 50)
 (define (split-vec u)
   (if (equal? (norm u) 0) u
@@ -236,26 +268,29 @@
                      (current-inexact-milliseconds)))))
 (define (byte->meters b near far)
   (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
-(define (auto-depth! n depth-map)
-  (define (d t)
-    (define pix (cadr (get-pixel depth-map (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))))
-    (define s (+ (* 9 (- 1 (/ pix 255))) 1) )
-    s)
-  (set-gfx-drawable-depth! (car (gfx-node-children (car (gfx-node-children n)))) d));todo ugly
 
-(require "pf.rkt")
 
-(define (make-grid positions)
+
+; debugging
+
+(define debug-things (make-hash))
+(define (remove-debug name)
+  (gfx-node-remove-all current-scene (hash-ref debug-things name)))
+(define (draw-debug-grid name positions)
   (define gns (make-hash))
-  (for ([p positions])
+  (when (hash-has-key? debug-things name)
+    (remove-debug name))
+  (define nodes (for/list ([p positions])
     (define bn (gfx-image 'pixel))
-    ;(set-gfx-node-scale! bn (constant 10))
+    ;(set-gfx-node-scale! bn (constant 2))
     (set-gfx-node-translation! bn (constant p))
-    (set-gfx-drawable-colorize! bn (list 255 0 0 255))
+    (set-gfx-drawable-colorize! bn (list 0 0 255 255))
     (hash-set! gns p bn)
-    (gfx-node-add current-scene bn))
-  gns)
-(define main-grid #f)
+    (gfx-node-add current-scene bn)
+    bn))
+  (hash-set! debug-things name nodes))
+(register-event (lambda (_) #t) (lambda (e) (printf "event: ~a\n" e)))
+
 (define main-r-grid #f)
 (register-event (lambda (e) (equal? e 'enter ))
                 (lambda (e)
@@ -263,13 +298,17 @@
                   (auto-depth! n 'fx/ch1/well-dm)
                   (define (u t)
                     
-                    (define s (byte->meters (cadr (get-pixel 'fx/ch1/well-dm (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))) 1 1.5))
+                    (define s (byte->meters (cadr (get-pixel 'fx/ch1/well-dm (vec->int-vec ((lin-tr (gfx-node-transform n)) t)))) 1 2))
 
                     ;(printf "S:~a\n" s)
                     (/ 1 s))
                   (start-anim 'bob 'fx/bob-still)
-                 (set-gfx-node-scale! (car (gfx-node-children n)) u)
-                  (set! main-r-grid (build-grid-from-image 'fx/ch1/well/wellwell-cm))
+                  (set-gfx-node-scale! (car (gfx-node-children n)) u)
+                  (define g1 (build-grid-from-image 'fx/ch1/well/wellwell-cm))
+                  (define g2 (build-grid-from-image 'fx/ch1/well/ferme-cm))
+                  ;(set! main-r-grid g1)
+                  (draw-debug-grid 'pf-g1 (hash-keys (combine-grids 0 0 WIDTH HEIGHT g1 g2)))
+                  ;(draw-debug-grid 'pfg2 (hash-keys g1))
                   ;(set! main-grid (make-grid (hash-keys main-r-grid)))
                  ))
                   

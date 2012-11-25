@@ -22,15 +22,19 @@
   (hash-set! texture-frames name (cons (cv begin-frame) (cv end-frame))))
 
 (define texture-store (make-hash)) ; 'image-name -> handle for the image stored on the gfx card memory
-(define image-store (make-hash)) ; 'image-name -> raw argb data in RAM
+(define image-store (make-hash)) ; 'image-name -> raw argb data in RAM (bitmap% object)
 
-(define (image-by-name name)
-  (image-data (hash-ref! image-store name
+(define (bitmap-by-name name)
+  (hash-ref! image-store name
                          (lambda ()
                            (let ([path (hash-ref texture-paths name)])
                              (if (symbol? path)
                                  (image-by-name path)
-                                 (load-image (car path))))))))
+                                 (if (equal? (length path) 1)
+                                     (crop-image name (load-image (car path)))
+                                     (error "trying to acces pixel data of a multi-image texture")))))))
+(define (image-by-name name)
+  (image-data (bitmap-by-name name)))
 
 (define (texture-by-name name)
   (hash-ref! texture-store name
@@ -38,21 +42,52 @@
               (let ([path (hash-ref texture-paths name)])
                 (if (symbol? path)
                     (let ([tt (struct-copy texture (texture-by-name path))]) (set-texture-x-flip?! tt (hash-ref texture-xf name)) tt)
-                    (load-tex path))))))
+                    (load-tex name path))))))
 (define (image-w image-name)
-  (texture-w (texture-by-name image-name)))
+  (send (bitmap-by-name image-name) get-width))
 (define (image-h image-name)
-  (texture-h (texture-by-name image-name))); equally as bad as below
+  (send (bitmap-by-name image-name) get-height))
 
 (define (get-pixel image-name pos)
-  (let* ([tex (texture-by-name image-name)]; inefficient, we force the loading of the tex in the gfx mem
-         [w (texture-w tex)] [h (texture-h tex)]
-         [i0 (* 4 (+ (vec-x pos) (* w (- h (vec-y pos)))))]
+  (let* ([w (image-w image-name)] [h (image-h image-name)]
+         ;[pos (vec->int-vec (lin-apply (texture-transform image-name) orig-pos))]
+         [i0 (* 4 (+ (vec-x pos) (* w (- h (vec-y pos) 1))))]
          [b (image-by-name image-name)])
-    (if (>= (+ i0 4) (bytes-length b))
-        (list 128 128 128 128)
+    (if (or (>= (vec-x pos) w)
+            (< (vec-x pos) 0)
+            (>= (vec-y pos) h)
+            (< (vec-y pos) 0))
+        (list 0 0 0 0);(error (format "Not in image (~ax~a) space : ~a ~a (~a >= ~a)" w h (vec-x pos) (- h (vec-y pos) 1) (+ i0 4) (bytes-length b)))
         (for/list ([i (in-range i0 (+ i0 4))])
           (bytes-ref b i)))))
+
+; returns the first p = (x0, y0) + (n*dx, n*dy) such that the rect (p, w, h) is not fully transparent
+(define (first-non-empty-rect bitmap x0 y0 w h dx dy max-n)
+  (define null-bytes (make-bytes (* 4 w h) 0))
+  (define pix (make-bytes (* 4 w h) 0))
+  (for/last ([n (in-range 0 max-n)]
+        #:final (begin (send bitmap get-argb-pixels (+ x0 (* n dx)) (+ y0 (* n dy)) w h pix #t) (not (bytes=? null-bytes pix))))
+    n))
+(define (crop-image name bitmap)
+  (define w (send bitmap get-width))
+  (define h (send bitmap get-height))
+  (define right-limit (- w (first-non-empty-rect bitmap (- w 1) 0 1 h -1 0 (- w 1))))
+  (define left-limit (first-non-empty-rect bitmap 0 0 1 h 1 0 (- w 1)))
+  (define top-limit (first-non-empty-rect bitmap 0 0 w 1 0 1 (- h 1)))
+  (define bot-limit (- h (first-non-empty-rect bitmap 0 (- h 1) w 1 0 -1 (- h 1))))
+  (define new-w (- right-limit left-limit))
+  (define new-h (- bot-limit top-limit))
+  (define pix (make-bytes (* w h 4) 0))
+  (send bitmap get-argb-pixels left-limit top-limit new-w new-h pix)
+  (define res (make-object bitmap% new-w new-h #f #t))
+  (send res set-argb-pixels 0 0 new-w new-h pix)
+  (printf "setting crop ~a ~a\n" name bot-limit)
+  (define t (lin-translation (vec left-limit (- h bot-limit))))
+  ;(hash-update! texture-transforms name (lambda (f) (lin-compose f t) t))
+  (hash-set! texture-transforms name t)
+  res)
+
+;(crop-image (load-image "ass/well/8.png"))
 
 ; todo remove all the dirty hashes
 (define texture-frames (make-hash))
@@ -94,8 +129,6 @@
     (glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER GL_LINEAR)
     (glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER GL_LINEAR)
     (glTexImage2D GL_TEXTURE_2D 0 GL_RGBA (* w line-size) (* h line-count) 0 GL_RGBA GL_UNSIGNED_BYTE (make-cvector _ubyte 0))
-    (displayln line-count)
-    (printf "WH ~a ~a\n" w h)
     (for ([frame data] [i (in-range 0 n)])
       (glTexSubImage2D GL_TEXTURE_2D 0 (* (modulo i line-size) w) (* (quotient i line-size) h) w h GL_BGRA GL_UNSIGNED_BYTE frame))
     (texture tex w h (/ 1 line-size) (/ 1 line-count) #f)))
@@ -112,10 +145,13 @@
 ;    (printf "bytes ~a ~a\n" (bytes-length b) (bytes->list (subbytes b 0 12)))
   b))
 
-(define (load-tex fns)
+(define (load-tex name fns)
   (printf ":loadt ~a\n" fns)
   (let ([images (for/list ([fn fns]) ; build a list of '(w h image-data)
-                  (let* ([bmp (load-image fn)]
+                  (let* ([bmp0 (load-image fn)]
+                         [bmp (if (equal? (length fns) 1)
+                                  (crop-image name bmp0)
+                                  bmp0)]
                          [pixels (image-data bmp)])
                     (list (send bmp get-width) (send bmp get-height) pixels bmp)))])
     
