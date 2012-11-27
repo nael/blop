@@ -20,7 +20,8 @@
   (hash-set! texture-xf name x-flip?)
   (hash-set! texture-transforms name (if (symbol? path) (texture-transform path) (lin offset scale 0)))
   (hash-set! texture-frames name (cons (cv begin-frame) (cv end-frame))))
-
+(define (register-dynamic-image name bitmap)
+  (hash-set! image-store name bitmap))
 (define texture-store (make-hash)) ; 'image-name -> handle for the image stored on the gfx card memory
 (define image-store (make-hash)) ; 'image-name -> raw argb data in RAM (bitmap% object)
 
@@ -35,7 +36,8 @@
                                      (error "trying to acces pixel data of a multi-image texture")))))))
 (define (image-by-name name)
   (image-data (bitmap-by-name name)))
-
+(define (image-exists? name)
+  (hash-has-key? texture-paths name))
 (define (texture-by-name name)
   (hash-ref! texture-store name
             (lambda ()
@@ -48,8 +50,26 @@
 (define (image-h image-name)
   (send (bitmap-by-name image-name) get-height))
 
-(define (get-pixel image-name pos)
-  (let* ([w (image-w image-name)] [h (image-h image-name)]
+(define (clamp x m M)
+  (max (min x M) m))
+(define (rect-transparent? image-name x y w h)
+  (let* ([iw (image-w image-name)]
+         [ih (image-h image-name)]
+         [nx (clamp x 0 (- iw 1))]
+         [ny (clamp y 0 (- ih 1))]
+         [nw (clamp w 0 (- iw nx 1))]
+         [nh (clamp h 0 (- ih ny 1))]
+         [pixels (make-bytes (* 4 nw nh) 0)]
+         [n (bytes-length pixels)])
+    (send (bitmap-by-name image-name) get-argb-pixels
+          nx (- ih ny 1) nw nh
+          pixels)
+    (for/and ([i (in-range 0 n 4)])
+      (= (bytes-ref pixels i) 0))))
+
+(define (get-pixel image-name inexact-pos)
+  (let* ([pos (vec->int-vec inexact-pos)]
+         [w (image-w image-name)] [h (image-h image-name)]
          ;[pos (vec->int-vec (lin-apply (texture-transform image-name) orig-pos))]
          [i0 (* 4 (+ (vec-x pos) (* w (- h (vec-y pos) 1))))]
          [b (image-by-name image-name)])
@@ -58,8 +78,8 @@
             (>= (vec-y pos) h)
             (< (vec-y pos) 0))
         (list 0 0 0 0);(error (format "Not in image (~ax~a) space : ~a ~a (~a >= ~a)" w h (vec-x pos) (- h (vec-y pos) 1) (+ i0 4) (bytes-length b)))
-        (for/list ([i (in-range i0 (+ i0 4))])
-          (bytes-ref b i)))))
+          (for/list ([i (in-range i0 (+ i0 4))])
+            (bytes-ref b i)))))
 
 ; returns the first p = (x0, y0) + (n*dx, n*dy) such that the rect (p, w, h) is not fully transparent
 (define (first-non-empty-rect bitmap x0 y0 w h dx dy max-n)
@@ -81,7 +101,6 @@
   (send bitmap get-argb-pixels left-limit top-limit new-w new-h pix)
   (define res (make-object bitmap% new-w new-h #f #t))
   (send res set-argb-pixels 0 0 new-w new-h pix)
-  (printf "setting crop ~a ~a\n" name bot-limit)
   (define t (lin-translation (vec left-limit (- h bot-limit))))
   ;(hash-update! texture-transforms name (lambda (f) (lin-compose f t) t))
   (hash-set! texture-transforms name t)
@@ -146,7 +165,6 @@
   b))
 
 (define (load-tex name fns)
-  (printf ":loadt ~a\n" fns)
   (let ([images (for/list ([fn fns]) ; build a list of '(w h image-data)
                   (let* ([bmp0 (load-image fn)]
                          [bmp (if (equal? (length fns) 1)
@@ -161,4 +179,4 @@
       (make-tex-argb w h (map  (lambda (b) (make-cvector* b _ubyte (bytes-length b))) (map caddr images))))))
 
 (provide (struct-out texture)
-         get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord image-by-name load-image image-w image-h)
+         register-dynamic-image rect-transparent? image-exists? get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord image-by-name load-image image-w image-h)

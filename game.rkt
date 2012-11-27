@@ -1,6 +1,6 @@
 #lang racket
 
-(require "render.rkt" "assets.rkt" "math.rkt" "pf.rkt")
+(require "render.rkt" "assets.rkt" "math.rkt" "pf.rkt" "utils.rkt")
 
 ; board definitions
 
@@ -8,7 +8,9 @@
 (struct board-data (background things))
 (struct thing (name
                node
-               (walk-dest #:mutable #:auto)))
+               
+               (walk-dest #:mutable #:auto)
+               (cmap #:mutable #:auto)))
 
 (define (things . l)
   (map (lambda (tn)
@@ -26,7 +28,11 @@
 (define (layer ln d imgname)
   (define n (gfx-image imgname))
   (set-gfx-drawable-depth! n (constant d))
-  (thing ln n))
+  (define t (thing ln n))
+  (define cmsym (string->symbol (format "~a-cm" (symbol->string imgname))))
+  (when (image-exists? cmsym)
+    (set-thing-cmap! t cmsym))
+  t)
 
 (define (board name . elements)
   (define bg #f)
@@ -48,11 +54,15 @@
   (let* ([tex (texture-by-name img)]
          [bg-w (texture-w tex)] [bg-h (texture-h tex)])
     (define scale (exact->inexact (min (/ WIDTH bg-w) (/ HEIGHT bg-h))))
-    (define mid-x (/ (- (/ WIDTH scale) bg-w) 2))
-    (define mid-y (/ (- (/ HEIGHT scale) bg-h) 2))
+    (define mid-x 0);(/ (- (/ WIDTH scale) bg-w) 2))
+    (define mid-y 0);(/ (- (/ HEIGHT scale) bg-h) 2))
     (let ([tr (lin (vec mid-x mid-y) scale 0)])
       (set-gfx-node-transform! sc (constant tr))
       (gfx-drawable (constant-lin (vec 0 0) 1 0) (list) img (constant 0) (constant 255)))))
+(define (viewport-w)
+  (image-w (board-data-background (current-board))))
+(define (viewport-h)
+  (image-h (board-data-background (current-board))))
 (define current-scene #f)
 (define current-board-name 'none)
 (define (current-board) (hash-ref boards current-board-name))
@@ -64,6 +74,8 @@
   (define b (hash-ref boards bname))
   (unless (equal? (board-data-background b) #f) (gfx-node-add s (make-bg-node s (board-data-background b))))
   (for ([(_ t) (board-data-things b)])
+    (when (thing-cmap t)
+      (set! current-cmaps (cons (build-cmap-from-image (thing-cmap t) 15) current-cmaps)))
     (gfx-node-add s (thing-node t))))
 
 
@@ -121,7 +133,8 @@
 
 
 (board 'ch1/well
-       (background 'fx/ch1/well/horiz)
+       (background 'fx/ch1/well/bg)
+       (layer 'lm1 21 'fx/ch1/well/horiz)
        ;(layer 'lm1 19 'fx/ch1/well-background)
        (layer 'l0 20 'fx/ch1/well/maisons)
        (layer 'l1 9.5 'fx/ch1/well/canap)
@@ -219,53 +232,66 @@
   (remove-duplicates (cond [(null? path) null]
                            [(null? (cdr path)) path]
                            [else (append (split-path-seg (car path) (cadr path)) (split-path (cdr path)))])))
-  
+(define (is-walkable? pos)
+  (for/and ([cm current-cmaps])
+    (define e (lin-apply (lin-inverse (texture-transform (cmap-image cm))) pos))
+    (zero? (cadddr (get-pixel (cmap-image cm) (vec->int-vec e))))))
 (define (check-line img start end)
   (define u (vec- end start))
   (define nu (normalize u))
   (define ntick (exact->inexact (ceiling (norm u))))
-  (for/and ([t (in-range 0 ntick 1)])
-    (zero? (car (get-pixel img (vec->int-vec (vec+ start (vec* t nu)))))))) ; warning no transfrom taken into account
+  (for/and ([t (in-range 0 ntick 2)])
+    (is-walkable? (vec+ start (vec* t nu)))))
+    
+(define current-cmaps null)
+
+(define (walk-to thing-name real-endpos)
+  (define graph (with-counter 'make-graph (lambda () (make-pf-graph 0 0 (viewport-w) (viewport-h) current-cmaps))))
+  (draw-debug-grid 'pff (hash-keys graph))
+  (define endpos (grid-nearest graph real-endpos))
+  (define real-startpos ((lin-tr (gfx-node-transform (thing-node (thing-by-name thing-name)))) (current-inexact-milliseconds)))
+  (define startpos (grid-nearest graph real-startpos))
+  (define path (with-counter 'dijkstra (lambda () (djs graph startpos endpos))))
+  ;(draw-debug-grid 'path path)
+  (define (simplify-path from pt)
+    (cond [(null? pt) null]
+          [(check-line 'fx/ch1/well/wellwell-cm from (car pt)) (list (car pt))]
+          [else (cons (car pt) (simplify-path from (cdr pt)))]
+          ))
+  (define (enhance-p pt)
+    (define ept (split-path (cons (car pt) (reverse (simplify-path (car pt) (reverse (cdr pt)))))))
+    ept)
+  (define (eept pt)
+    (if (null? pt) null
+        (let ([ept (enhance-p pt)])
+          (cons (car ept) (eept (cdr ept))))))
+  (define (walk-path pt)
+    (if (null? pt)
+        do-nothing
+        (let ([ept (enhance-p pt)])
+          (seq (if (null? (cdr ept))
+                   (walk-straight-and-stop 'bob (car ept))
+                   (walk-straight 'bob (car ept)))
+               (walk-path (cdr ept))))))
+  (define sqp (cons real-startpos (append path (list real-endpos))))
+  (define final-path sqp)
+  (with-counter 'path-simplify (lambda () (walk-path final-path))))
 
 (register-event (lambda (e)
                   (and (pair? e) (equal? 'mouse-click (car e))))
                 (lambda (e)
                   (define real-endpos (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))))
-                  (when (zero? (car (get-pixel 'fx/ch1/well/wellwell-cm (vec->int-vec real-endpos))))
-                    (define endpos (grid-nearest main-r-grid real-endpos))
-                    (define real-startpos ((lin-tr (gfx-node-transform (thing-node (thing-by-name 'bob)))) (current-inexact-milliseconds)))
-                    (define startpos (grid-nearest main-r-grid real-startpos))
-                    (define path (djs main-r-grid startpos endpos))
-                    ;(for ([p path])
-                    ;  (set-gfx-drawable-colorize! (hash-ref main-grid p) (list 0 255 0 255)))
-                    (define (simplify-path from pt)
-                      (cond [(null? pt) null]
-                            [(check-line 'fx/ch1/well/wellwell-cm from (car pt)) (list (car pt))]
-                            [else (cons (car pt) (simplify-path from (cdr pt)))]
-                            ))
-                  (define (enhance-p pt)
-                    (define ept (split-path (cons (car pt) (reverse (simplify-path (car pt) (reverse (cdr pt)))))))
-                    ept)
-                    (define (eept pt)
-                      (if (null? pt) null
-                          (let ([ept (enhance-p pt)])
-                            (cons (car ept) (eept (cdr ept))))))
-                    (define (walk-path pt)
-                      (if (null? pt)
-                          do-nothing
-                          (let ([ept (enhance-p pt)])
-                            (seq (if (null? (cdr ept))
-                                     (walk-straight-and-stop 'bob (car ept))
-                                     (walk-straight 'bob (car ept)))
-                                 (walk-path (cdr ept))))))
-                    (define sqp (cons real-startpos (append path (list real-endpos))))
-                    (define final-path sqp); (eept sqp))
+                  ;(when (zero? (car (get-pixel 'fx/ch1/well/wellwell-cm (vec->int-vec real-endpos))))
+                  (when (is-walkable? real-endpos)
+                    ; (eept sqp))
                     ;(when main-grid (gfx-node-remove-all current-scene (hash-values main-grid)))
                     ;(set! main-grid (make-grid (remove-duplicates (append final-path (split-path sqp)))))
                     (do-action
                      ;(walk-straight 'bob (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))))
-                     (walk-path final-path)
-                     (current-inexact-milliseconds)))))
+                     (with-counter 'pf (lambda () (walk-to 'bob real-endpos)))
+                     (current-inexact-milliseconds)))
+                    (printf "PF perfs =============\n")
+                    (print-counters)))
 (define (byte->meters b near far)
   (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
 
@@ -304,11 +330,16 @@
                     (/ 1 s))
                   (start-anim 'bob 'fx/bob-still)
                   (set-gfx-node-scale! (car (gfx-node-children n)) u)
-                  (define g1 (build-grid-from-image 'fx/ch1/well/wellwell-cm))
-                  (define g2 (build-grid-from-image 'fx/ch1/well/ferme-cm))
+                  (set-gfx-node-translation! current-scene
+                                             (lambda (t)
+                                               (vec+ (vec* -1 ((lin-tr (gfx-node-transform (thing-node (thing-by-name 'bob)))) t))
+                                                     (vec 650 250))))
+                  ;(define g1 (build-cmap-from-image 'fx/ch1/well/wellwell-cm 15))
+                  ;(define g2 (build-cmap-from-image 'fx/ch1/well/ferme-cm 15))
+                  ;(set! current-cmaps (list g1 g2))
                   ;(set! main-r-grid g1)
-                  (draw-debug-grid 'pf-g1 (hash-keys (combine-grids 0 0 WIDTH HEIGHT g1 g2)))
-                  ;(draw-debug-grid 'pfg2 (hash-keys g1))
+                  ;(draw-debug-grid 'pf-g1 (hash-keys (make-pf-graph 0 0 (viewport-w) (viewport-h) (combine-cmap g1 g2))))
+                  ;(draw-debug-grid 'pfg2 (set->list g1))
                   ;(set! main-grid (make-grid (hash-keys main-r-grid)))
                  ))
                   

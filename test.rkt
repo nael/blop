@@ -3,6 +3,7 @@
 (require (lib "gl.ss" "sgl")
          (lib "gl-vectors.ss" "sgl")
          racket/gui ffi/cvector
+         
          "assets.rkt"
          )
 (require "utils.rkt" "lvl.rkt" "render.rkt" "game.rkt" "math.rkt" "gui.rkt")
@@ -13,9 +14,13 @@
 
 (define s (make-scene))
 
+(require profile)
+
 (define (init-view)
-  (load-board s 'ch1/well)
-  (propagate-event 'enter))
+  ;(profile-thunk (lambda ()
+                   (load-board s 'ch1/well)
+                   (propagate-event 'enter));)
+  ;(exit))
 (define (timers t)
   (exec-timers-before t))
 
