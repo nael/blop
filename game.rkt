@@ -15,12 +15,16 @@
 (define (things . l)
   (map (lambda (tn)
          (thing tn
-                (gfx-node (constant-lin (vec 100 100) 1 0) (list (gfx-node (constant-lin (vec 0 0) 1 0) (list (gfx-image null)))))))
+                (gfx-node (constant-lin (vec 600 300) 1 0) (list (gfx-node (constant-lin (vec 0 0) 1 0) (list (gfx-image null)))))))
        l))
 (define boards (make-hash))
 
 (define (thing-drawable t)
-  (car (gfx-node-children (car (gfx-node-children (thing-node t))))))
+  (define c (gfx-node-children (thing-node t)))
+  (cond [(gfx-drawable? (thing-node t)) (thing-node t)]
+        [(null? c) #f]
+        [(null? (gfx-node-children (car c))) #f]
+        [else (car (gfx-node-children (car c)))]))
 
 (define (viewport->scene t u)
   (lin-apply (lin-inverse (lin-eval (gfx-node-transform current-scene) t)) u))
@@ -50,13 +54,15 @@
 
 ; modify the root node sc to scale and offset so that the background is maxed
 ; then returns a background node with the image
+; also clips viewport
 (define (make-bg-node sc img)
   (let* ([tex (texture-by-name img)]
          [bg-w (texture-w tex)] [bg-h (texture-h tex)])
-    (define scale (exact->inexact (min (/ WIDTH bg-w) (/ HEIGHT bg-h))))
-    (define mid-x 0);(/ (- (/ WIDTH scale) bg-w) 2))
-    (define mid-y 0);(/ (- (/ HEIGHT scale) bg-h) 2))
-    (let ([tr (lin (vec mid-x mid-y) scale 0)])
+    (define scale (min (/ WIDTH bg-w) (/ HEIGHT bg-h)))
+    (define x-offset (inexact->exact (round (/ (- WIDTH (* bg-w  scale)) 2)))) ;(/ (- (/ WIDTH scale) bg-w) 2))
+    (define y-offset (inexact->exact (round (/ (- HEIGHT (* bg-h scale)) 2)))) ;(/ (- (/ HEIGHT scale) bg-h) 2))
+    (set-clipping! sc x-offset y-offset (round (* scale bg-w)) (round (* scale bg-h)))
+    (let ([tr (lin (vec 0 0) (exact->inexact scale) 0)])
       (set-gfx-node-transform! sc (constant tr))
       (gfx-drawable (constant-lin (vec 0 0) 1 0) (list) img (constant 0) (constant 255)))))
 (define (viewport-w)
@@ -75,11 +81,19 @@
   (unless (equal? (board-data-background b) #f) (gfx-node-add s (make-bg-node s (board-data-background b))))
   (for ([(_ t) (board-data-things b)])
     (when (thing-cmap t)
-      (set! current-cmaps (cons (build-cmap-from-image (thing-cmap t) 15) current-cmaps)))
+      (define ds (build-cmap-from-image (thing-cmap t)))
+      (set-thing-cmap! t ds)
+      (set! current-cmaps (cons t current-cmaps)))
     (gfx-node-add s (thing-node t))))
 
-
-
+(define (thing-center t at-time)
+  (define d (thing-drawable t))
+  (vec+
+   (lin-tr (lin-eval (gfx-node-transform (thing-node t)) at-time))
+   (if d
+      (vec (/ (image-w (gfx-drawable-image d)) 2)
+           (/ (image-h (gfx-drawable-image d)) 2))
+      (vec 0 0))))
 ; node manipulation
 
 (define (animate! node start-time rate begin end)
@@ -116,13 +130,18 @@
 
 ; event handling
 
+; events are arbitrary, for now 
 (define event-handlers '())
 (define (register-event matcher handler)
-  (define (h evt)
-    (when (matcher evt) (handler evt)))
-  (set! event-handlers (cons h event-handlers)))
-(define (propagate-event e)
-  (for ([h event-handlers]) (h e)))
+  (set! event-handlers (cons (cons matcher handler) event-handlers)))
+(define (propagate-event e #:dry-run [dry-run? #f])
+  (define handled #f)
+  (for ([h event-handlers])
+    (define res ((car h) e));aif
+    (when res
+      (set! handled #t)
+      (unless dry-run? ((cdr h) res))))
+  handled)
 (define timers '())
 (define (register-timer at-time fun)
   (set! timers (cons (cons at-time fun) timers)))
@@ -134,8 +153,8 @@
 
 (board 'ch1/well
        (background 'fx/ch1/well/bg)
+       ;(layer 'lbg 1 'fx/ch1/well/bg)
        (layer 'lm1 21 'fx/ch1/well/horiz)
-       ;(layer 'lm1 19 'fx/ch1/well-background)
        (layer 'l0 20 'fx/ch1/well/maisons)
        (layer 'l1 9.5 'fx/ch1/well/canap)
        (layer 'l2 9 'fx/ch1/well/serre)
@@ -234,8 +253,9 @@
                            [else (append (split-path-seg (car path) (cadr path)) (split-path (cdr path)))])))
 (define (is-walkable? pos)
   (for/and ([cm current-cmaps])
-    (define e (lin-apply (lin-inverse (texture-transform (cmap-image cm))) pos))
-    (zero? (cadddr (get-pixel (cmap-image cm) (vec->int-vec e))))))
+    (not (cmap-collision? (thing-cmap cm) pos))))
+    ;(define e (lin-apply (lin-inverse (texture-transform (cmap-image cm))) pos))
+    ;(zero? (cadddr (get-pixel (cmap-image cm) (vec->int-vec e))))))
 (define (check-line img start end)
   (define u (vec- end start))
   (define nu (normalize u))
@@ -246,8 +266,12 @@
 (define current-cmaps null)
 
 (define (walk-to thing-name real-endpos)
-  (define graph (with-counter 'make-graph (lambda () (make-pf-graph 0 0 (viewport-w) (viewport-h) current-cmaps))))
-  (draw-debug-grid 'pff (hash-keys graph))
+  (define graph (with-counter 'make-graph (lambda () (make-pf-graph 0 0 (viewport-w) (viewport-h)
+                                                                    (map (lambda (t)
+                                                                           (cons (lin-eval (gfx-node-transform (thing-node t)) (current-inexact-milliseconds))
+                                                                                 (thing-cmap t)))
+                                                                         current-cmaps)))))
+  ;(draw-debug-grid 'pff (hash-keys graph))
   (define endpos (grid-nearest graph real-endpos))
   (define real-startpos ((lin-tr (gfx-node-transform (thing-node (thing-by-name thing-name)))) (current-inexact-milliseconds)))
   (define startpos (grid-nearest graph real-startpos))
@@ -277,21 +301,27 @@
   (define final-path sqp)
   (with-counter 'path-simplify (lambda () (walk-path final-path))))
 
+
+
 (register-event (lambda (e)
-                  (and (pair? e) (equal? 'mouse-click (car e))))
-                (lambda (e)
-                  (define real-endpos (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))))
+                  (and (pair? e) (equal? 'mouse-click (car e))
+                       (begin
+                         (let* ([pos (vec (cadr e) (caddr e))]
+                                [real-endpos (viewport->scene  (current-inexact-milliseconds) pos)])
+                           (and (is-walkable? real-endpos) real-endpos)))))
+                (lambda (pos)
+                  
                   ;(when (zero? (car (get-pixel 'fx/ch1/well/wellwell-cm (vec->int-vec real-endpos))))
-                  (when (is-walkable? real-endpos)
                     ; (eept sqp))
                     ;(when main-grid (gfx-node-remove-all current-scene (hash-values main-grid)))
                     ;(set! main-grid (make-grid (remove-duplicates (append final-path (split-path sqp)))))
                     (do-action
                      ;(walk-straight 'bob (viewport->scene  (current-inexact-milliseconds) (vec (cadr e) (caddr e))))
-                     (with-counter 'pf (lambda () (walk-to 'bob real-endpos)))
+                     (with-counter 'pf (lambda () (walk-to 'bob pos)))
                      (current-inexact-milliseconds)))
-                    (printf "PF perfs =============\n")
-                    (print-counters)))
+                    ;(printf "PF perfs =============\n")
+                    ;(print-counters)
+                  )
 (define (byte->meters b near far)
   (exact->inexact (+ near (* (- 1 (/ (+ b 1) 256)) (- far near)))))
 
@@ -315,9 +345,29 @@
     (gfx-node-add current-scene bn)
     bn))
   (hash-set! debug-things name nodes))
-(register-event (lambda (_) #t) (lambda (e) (printf "event: ~a\n" e)))
+
 
 (define main-r-grid #f)
+(define (auto-parr! tn)
+  (define l5p (thing-center (thing-by-name tn) (current-inexact-milliseconds)))
+  (set-gfx-node-translation! (thing-node (thing-by-name tn))
+                             (lambda (t)
+                               (define bob-p ((lin-tr (gfx-node-transform (thing-node (thing-by-name 'bob)))) t))
+                               (define d (vec- bob-p l5p))
+                               (vec (* (/ -1 8) (vec-x d))
+                                                    0))))
+
+(require (planet clements/rsound))
+(define g5b "ass\\snd\\gfb.wav")
+(define music (rs-read g5b))
+(define len (* 1000 (/ (rs-frames music) (rs-read-sample-rate g5b))))
+(define (((play-sound) next) t)
+  (play music)
+  (register-timer (+ t len) next)); todo warning cancellation
+(define (((loop a) next) t)
+  ((a (lambda (t) (((loop a) next) t))) t))
+(define (play-music)
+  (loop (play-sound)))
 (register-event (lambda (e) (equal? e 'enter ))
                 (lambda (e)
                   (define n (thing-node (thing-by-name 'bob)))
@@ -334,6 +384,7 @@
                                              (lambda (t)
                                                (vec+ (vec* -1 ((lin-tr (gfx-node-transform (thing-node (thing-by-name 'bob)))) t))
                                                      (vec 650 250))))
+                  
                   ;(define g1 (build-cmap-from-image 'fx/ch1/well/wellwell-cm 15))
                   ;(define g2 (build-cmap-from-image 'fx/ch1/well/ferme-cm 15))
                   ;(set! current-cmaps (list g1 g2))
@@ -341,6 +392,7 @@
                   ;(draw-debug-grid 'pf-g1 (hash-keys (make-pf-graph 0 0 (viewport-w) (viewport-h) (combine-cmap g1 g2))))
                   ;(draw-debug-grid 'pfg2 (set->list g1))
                   ;(set! main-grid (make-grid (hash-keys main-r-grid)))
+                  (do-action (play-music) (current-inexact-milliseconds))
                  ))
                   
 (provide thing-by-name load-board propagate-event exec-timers-before)

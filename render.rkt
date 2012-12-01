@@ -22,7 +22,10 @@
   (set-gfx-node-children! n (remove c (gfx-node-children n))))
 (define (gfx-node-remove-all n cs)
   (for-each ((curry gfx-node-remove) n) cs))
-(define draw-depth-mode #f);todo make this clean way
+
+(define scene-clipping (make-weak-hash));todo make this clean way
+(define (set-clipping! sc x y w h)
+  (hash-set! scene-clipping sc (list x y w h)))
 
 (define (rad->deg r) (* r (/ 180 pi)))
 
@@ -92,6 +95,10 @@
                (for/list ([c (gfx-node-children node)])
                          (render-node c cur)))))
   (let ([draw-calls (render-node scene (lin (vec 0 0) 1 0))])
+    (when (hash-has-key? scene-clipping scene)
+      (glEnable GL_SCISSOR_TEST)
+      (define s (hash-ref scene-clipping scene))
+      (glScissor (car s) (cadr s) (caddr s) (cadddr s)))
     (for ([c (sort draw-calls (lambda (c1 c2) (> (car c1) (car c2))))]) ((cdr c)))))
     
 (define (ce)
@@ -120,7 +127,7 @@
       #t)))
 
 (define (draw-opengl scene)
-  (glClearColor 1 0 0 1)
+  (glClearColor 0 0 0 1)
   (glClear GL_COLOR_BUFFER_BIT)
 ;  (glEnable GL_DEPTH_TEST)
 ;  (glDepthMask GL_TRUE)
@@ -133,7 +140,7 @@
 
 (define my-canvas%
   (class* canvas% ()
-    (inherit refresh with-gl-context swap-gl-buffers)
+    (inherit refresh set-cursor with-gl-context swap-gl-buffers)
     (init-field scene)
     (init-field init-cb)
     (init-field event-cb)
@@ -153,13 +160,14 @@
            (queue-callback (lambda () (refresh)) #f))))
     
     (define/override (on-char key-event)
-      (display "key evt ")
-      (displayln key-event)
-      (when (equal? (send key-event get-key-code) #\q ) (custodian-shutdown-all (current-custodian)))
-      (when (equal? (send key-event get-key-code) #\d )(set! draw-depth-mode (not draw-depth-mode))))
+      ;(displayln key-event)
+      (when (equal? (send key-event get-key-code) #\d ) (printf "Perfs ============\n") (print-counters))
+      (when (equal? (send key-event get-key-code) #\q ) (custodian-shutdown-all (current-custodian))))
     (define/override (on-event mouse-event)
+      (define click-event (list 'mouse-click (send mouse-event get-x) (- HEIGHT (send mouse-event get-y))))
       (when (send mouse-event button-up? 'left)
-        (event-cb (list 'mouse-click (send mouse-event get-x) (- HEIGHT (send mouse-event get-y))))))
+        (event-cb click-event))
+      (set-cursor (make-object cursor% (if (event-cb click-event #:dry-run #t) 'hand 'arrow))))
       ;(printf "mouse evt : ~a ~a\n" (send mouse-event get-x) (send mouse-event get-y)))
     (define/override (on-size width height)
       (with-gl-context
@@ -176,7 +184,7 @@
   (define gl  (new my-canvas% [parent win] [scene s] [init-cb init-cb] [event-cb event-cb] [timer-cb timer-cb]))
   (send win show #t))
 
-(provide WIDTH HEIGHT constant-lin set-gfx-node-scale! set-gfx-node-translation! gfx-node-add constant make-view gfx-image  lin-eval)
+(provide WIDTH HEIGHT constant-lin set-gfx-node-scale! set-clipping! set-gfx-node-translation! gfx-node-add constant make-view gfx-image  lin-eval)
 (provide (struct-out gfx-node) (struct-out gfx-drawable) gfx-node-remove gfx-node-remove-all)
 #|(provide (contract-out 
           [struct gfx-node ([transform lin?] [children list?])]

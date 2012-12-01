@@ -1,8 +1,8 @@
 #lang racket
 
-(require "assets.rkt" "lvl.rkt" "math.rkt")
+(require racket/gui "assets.rkt" "lvl.rkt" "math.rkt")
 
-(define sqw 30)
+(define sqw 20)
 
 ; a collision map is a set of points which are obstacles for at most a sqw-sided square
 (struct cmap (points sqw min max image))
@@ -10,33 +10,26 @@
 ; the pf graph is a hash map posn -> vertex state
 
 ; I is image-name
-(define (build-cmap-from-image I sqw)
-  (define i (image-by-name I))
-  ;(define (check-square x y)
-  ;  (for*/and ([dx (in-range (- (/ sqw 2)) (/ sqw 2))]
-  ;             [dy (in-range (- (/ sqw 2)) (/ sqw 2))])
-  ;    (zero? (car (get-pixel I (vec (+ x dx) (+ y dy)))))))
-  (define (check-square x y)
-    (rect-transparent? I (round (- x (/ sqw 2))) (round (- y (/ sqw 2))) sqw sqw))
-  (define pts
-    (for*/set ([y (in-range (- sqw) (+ (image-h I) sqw) sqw)]
-               [x (in-range (- (* 2 sqw)) (+ (image-w I) sqw 1) sqw)]
-               #:when (not (check-square x y)))
-              (vec x y)))
-  (define cm (cmap pts
-                   sqw
-                   (vec (apply min (set-map pts vec-x))
-                        (apply min (set-map pts vec-y)))
-                   (vec (apply max (set-map pts vec-x))
-                        (apply max (set-map pts vec-y)))
-                   I))
-  cm)
+(define (build-cmap-from-image I)
+  (define cmw (ceiling (/ (image-w I) sqw)))
+  (define cmh (ceiling (/ (image-h I) sqw)))
+  (define cmap (make-object bitmap% cmw cmh #f #t))
+  (for* ([x (in-range 0 cmw)]
+        [y (in-range 0 cmh)])
+    ;(when (rect-transparent? I (* x sqw) (* y sqw) sqw sqw)
+    ;  (printf "OK ~a ~a (~ax~a)\n" x y cmw cmh)
+    ;  (send cmap set-argb-pixels x y 1 1 #"\0\255\255\255"))
+    (unless (rect-transparent? I (* x sqw) (* y sqw) sqw sqw)
+      (send cmap set-argb-pixels x (- cmh y 1) 1 1 #"\255\0\0\0")))
+  (define cmapsym (gensym (format "~a-downscaled" (symbol->string I))))
+  (register-dynamic-image cmapsym cmap (lin-compose (texture-transform I) (lin-hom sqw)))
+  cmapsym)
   ;(transform-cmap cm (texture-transform I)))
 (define (make-pf-graph x0 y0 w h cmaps)
   (define gc (make-hash))
   (for* ([y (in-range (+ x0 (/ sqw 2)) (- h (/ sqw 2)) sqw)]
          [x (in-range (+ y0 (/ sqw 2)) (- w (/ sqw 2) 1) sqw)])
-    (unless (for/or ([cm cmaps]) (cmap-collision? cm (vec x y)))
+    (unless (for/or ([cm cmaps]) (cmap-collision? (cdr cm) (lin-apply (lin-inverse (car cm)) (vec x y))))
       (hash-set! gc (vec x y) (cons +inf.0 #f))))
   gc)
 (define (combine-cmap c1 c2)
@@ -49,21 +42,14 @@
         #f))
 (define (grid-nearest g u)
   (argmin (lambda (v) (norm (vec- u v))) (hash-keys g)))
-(define (cmap-collision? cm u)
-  (if (and (<= (vec-x (cmap-min cm)) (vec-x u))
-           (<= (vec-y (cmap-min cm)) (vec-y u))
-           (>= (vec-x (cmap-max cm)) (vec-x u))
-           (>= (vec-y (cmap-max cm)) (vec-y u)))
-      (for/or ([v (cmap-points cm)])
-        (<= (norm (vec- u v)) (* (sqrt 2) (cmap-sqw cm))))
+(define (cmap-collision? cm u0)
+  (define u (lin-apply (lin-inverse (texture-transform cm)) u0))
+  (if (and (<= 0 (vec-x u))
+           (<= 0 (vec-y u))
+           (> (image-w cm) (vec-x u))
+           (> (image-h cm) (vec-y u)))
+      (not (pixel-transparent? cm (vec->int-vec u)))
       #f))
-(define (transform-cmap cm f)
-  (cmap (list->set (set-map (cmap-points cm) ((curry lin-apply) f)))
-        (cmap-sqw cm)
-        (lin-apply f (cmap-min cm))
-        (lin-apply f (cmap-max cm))
-        (cmap-image cm))) ; CAREFUL THIS IS NOT TRUE FOR ANYTHING ELSE THAN A TRANSLATION
-        ; change it eventually
 
 
 (define (insert-sorted cmp lst n)

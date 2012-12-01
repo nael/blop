@@ -4,12 +4,14 @@
          (lib "gl-vectors.ss" "sgl")
          ffi/cvector ffi/unsafe ffi/unsafe/cvector
          )
-(require "math.rkt")
+(require "math.rkt" "utils.rkt")
 (struct texture (id w h sw sh (x-flip? #:mutable)))
-(define (load-image fn)
+(define (load-image-real fn)
   (let ([b (make-object bitmap% fn 'unknown/alpha)])
     (if (send b ok?) b (raise (string-append "failed to load image " fn)))))
-
+(define (load-image fn)
+  (with-counter 'image-load-ram
+                (lambda () (load-image-real fn))))
 (define texture-paths (make-hash))
 (define (register-image name begin-frame end-frame path #:offset [offset (vec 0 0)] #:scale [scale 1] #:x-flip? [x-flip? #f])
   (define (cv f)
@@ -20,20 +22,23 @@
   (hash-set! texture-xf name x-flip?)
   (hash-set! texture-transforms name (if (symbol? path) (texture-transform path) (lin offset scale 0)))
   (hash-set! texture-frames name (cons (cv begin-frame) (cv end-frame))))
-(define (register-dynamic-image name bitmap)
-  (hash-set! image-store name bitmap))
+(define (register-dynamic-image name bitmap tr)
+  (hash-set! image-store name bitmap)
+  (hash-set! texture-xf name #f)
+  (hash-set! texture-transforms name tr)
+  (hash-set! texture-frames name (cons 0 0))
+  (hash-set! texture-store name (load-tex name)))
 (define texture-store (make-hash)) ; 'image-name -> handle for the image stored on the gfx card memory
 (define image-store (make-hash)) ; 'image-name -> raw argb data in RAM (bitmap% object)
 
 (define (bitmap-by-name name)
-  (hash-ref! image-store name
-                         (lambda ()
+  (hash-ref! image-store name (lambda ()
                            (let ([path (hash-ref texture-paths name)])
                              (if (symbol? path)
-                                 (image-by-name path)
+                                 (bitmap-by-name path)
                                  (if (equal? (length path) 1)
                                      (crop-image name (load-image (car path)))
-                                     (error "trying to acces pixel data of a multi-image texture")))))))
+                                     (map load-image path)))))))
 (define (image-by-name name)
   (image-data (bitmap-by-name name)))
 (define (image-exists? name)
@@ -44,7 +49,7 @@
               (let ([path (hash-ref texture-paths name)])
                 (if (symbol? path)
                     (let ([tt (struct-copy texture (texture-by-name path))]) (set-texture-x-flip?! tt (hash-ref texture-xf name)) tt)
-                    (load-tex name path))))))
+                    (load-tex name))))))
 (define (image-w image-name)
   (send (bitmap-by-name image-name) get-width))
 (define (image-h image-name)
@@ -65,8 +70,9 @@
           nx (- ih ny 1) nw nh
           pixels)
     (for/and ([i (in-range 0 n 4)])
-      (= (bytes-ref pixels i) 0))))
-
+      (equal? (bytes-ref pixels i) 0))))
+(define (pixel-transparent? image-name pos)
+  (rect-transparent? image-name (vec-x pos) (vec-y pos) 1 1))
 (define (get-pixel image-name inexact-pos)
   (let* ([pos (vec->int-vec inexact-pos)]
          [w (image-w image-name)] [h (image-h image-name)]
@@ -122,19 +128,7 @@
   (modulo frame (round (/ 1 (texture-sw tex)))))
 (define (texture-y-coord tex frame)
   (quotient frame (round (/ 1 (texture-sw tex)))))
-;from racketgl
-(define (argb->rgba! pixels)
-  (define r (/ (gl-vector-length pixels) 4))
-  (for ((i (in-range r)))
-       (let* ((offset (* 4 i))
-              (alpha (gl-vector-ref pixels offset))
-              (red (gl-vector-ref pixels (+ 1 offset)))
-              (green (gl-vector-ref pixels (+ 2 offset)))
-              (blue (gl-vector-ref pixels (+ 3 offset))))
-         (gl-vector-set! pixels offset (quotient (* alpha red) 255))
-         (gl-vector-set! pixels (+ 1 offset) (quotient (* alpha green) 255))
-         (gl-vector-set! pixels (+ 2 offset) (quotient (* alpha blue) 255))
-         (gl-vector-set! pixels (+ 3 offset) alpha))))
+
 (define (ti n) (bitwise-and #xFFFFFFFF n))
 (define (make-tex-argb w h data)
   (let* ([tex (gl-vector-ref (glGenTextures 1) 0)]
@@ -164,19 +158,22 @@
 ;    (printf "bytes ~a ~a\n" (bytes-length b) (bytes->list (subbytes b 0 12)))
   b))
 
-(define (load-tex name fns)
-  (let ([images (for/list ([fn fns]) ; build a list of '(w h image-data)
-                  (let* ([bmp0 (load-image fn)]
-                         [bmp (if (equal? (length fns) 1)
-                                  (crop-image name bmp0)
-                                  bmp0)]
+(define (load-tex name)
+  (define b (bitmap-by-name name))
+  (define bmps (if (list? b) b (list b)))
+  (let ([images (for/list ([bmp bmps]) ; build a list of '(w h image-data)
+                  (let* (
                          [pixels (image-data bmp)])
                     (list (send bmp get-width) (send bmp get-height) pixels bmp)))])
     
     (let ([w (caar images)] [h (cadar images)])
       (when (not (andmap (lambda img (and (= (caar img) w)) (= (cadar img) h)) images))
         (raise "all images must be of the same size"))
-      (make-tex-argb w h (map  (lambda (b) (make-cvector* b _ubyte (bytes-length b))) (map caddr images))))))
+      ;(printf "Loading ~a in gfx memory ... " name)
+      (define tex (with-counter 'image-load-vram (lambda ()
+        (make-tex-argb w h (map  (lambda (b) (make-cvector* b _ubyte (bytes-length b))) (map caddr images))))))
+      ;(printf "done\n")
+      tex)))
 
-(provide (struct-out texture)
-         register-dynamic-image rect-transparent? image-exists? get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord image-by-name load-image image-w image-h)
+(provide (struct-out texture) bitmap-by-name
+         register-dynamic-image pixel-transparent? rect-transparent? image-exists? get-pixel texture-begin-end texture-transform register-image texture-by-name load-tex texture-x-coord texture-y-coord image-by-name load-image image-w image-h)

@@ -19,13 +19,13 @@
 (define (init-view)
   ;(profile-thunk (lambda ()
                    (load-board s 'ch1/well)
-                   (propagate-event 'enter));)
+                   (propagate-event 'enter));)qqqq
   ;(exit))
 (define (timers t)
   (exec-timers-before t))
 
 (parameterize ([uncaught-exception-handler default-exn-handler])
   (make-view s init-view propagate-event timers))
-;(define-namespace-anchor blop-top-level-ns)
-;(parameterize ([current-namespace (namespace-anchor->namespace blop-top-level-ns)])
-;  (graphical-read-eval-print-loop))
+(define-namespace-anchor blop-top-level-ns)
+(parameterize ([current-namespace (namespace-anchor->namespace blop-top-level-ns)])
+  (graphical-read-eval-print-loop))
